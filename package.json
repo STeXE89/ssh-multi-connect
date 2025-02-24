@@ -1,0 +1,137 @@
+{
+  "name": "ssh-multi-connect",
+  "displayName": "SSH Multi Connect",
+  "description": "This extension 'ssh-multi-connect' allows you to manage multiple SSH connections with terminals and remote files directly from Visual Studio Code at same time.",
+  "license": "GPL-3.0-only",
+  "author": {
+    "name": "STeXE89",
+    "email": "stexe@systemfailure.it",
+    "url": "https://github.com/STeXE89"
+  },
+  "version": "0.0.1",
+  "publisher": "STeXE89",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sshMultiConnect.addConnection",
+        "icon": "$(plus)",
+        "title": "Add SSH Connection",
+        "tooltip": "Add SSH Connection"
+      },
+      {
+        "command": "sshMultiConnect.connect",
+        "icon": "$(terminal)",
+        "title": "Connect to SSH",
+        "tooltip": "Connect to SSH"
+      },
+      {
+        "command": "sshMultiConnect.disconnect",
+        "icon": "$(stop)",
+        "title": "Disconnect from SSH",
+        "tooltip": "Disconnect from SSH"
+      },
+      {
+        "command": "sshMultiConnect.removeConnection",
+        "icon": "$(trash)",
+        "title": "Remove SSH Connection",
+        "tooltip": "Remove SSH Connection"
+      },
+      {
+        "command": "sshMultiConnect.openRemoteFile",
+        "icon": "$(file-code)",
+        "title": "Open Remote File",
+        "tooltip": "Open Remote File"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sshMultiConnect",
+          "title": "SSH Multi Connect",
+          "icon": "resources/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "sshMultiConnect": [
+        {
+          "id": "sshConnectionsView",
+          "name": "SSH Connections",
+          "icon": "resources/ssh_icon.png"
+        },
+        {
+          "id": "remoteFilesView",
+          "name": "Remote Files",
+          "contextualTitle": "${remoteFileViewTitle}"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "sshMultiConnect.addConnection",
+          "when": "view == sshConnectionsView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "sshMultiConnect.connect",
+          "when": "viewItem == sshConnectionDisconnected",
+          "group": "inline"
+        },
+        {
+          "command": "sshMultiConnect.disconnect",
+          "when": "viewItem == sshConnectionConnected",
+          "group": "inline"
+        },
+        {
+          "command": "sshMultiConnect.removeConnection",
+          "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
+          "group": "inline"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "sshMultiConnect.openRemoteFile",
+          "when": "resourceLangId == markdown",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test",
+    "generate-readme": "node generate-readme.js"
+  },
+  "dependencies": {
+    "ssh2": "^1.16.0",
+    "tmp": "^0.2.3"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@types/ssh2": "^1.15.4",
+    "@types/tmp": "^0.2.6",
+    "@types/vscode": "^1.96.0",
+    "@typescript-eslint/eslint-plugin": "^8.17.0",
+    "@typescript-eslint/parser": "^8.17.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "eslint": "^9.16.0",
+    "typescript": "^5.7.2"
+  }
+}
