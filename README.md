@@ -24,3 +24,11 @@ This extension contributes the following settings:
 
 - Currently, work only on unix-like systems, windows not supported.
 - The extension may not handle large file transfers efficiently.
+
+## Release Notes
+
+Below some last release note, for more details see the CHANGELOG.md
+
+## [0.0.1] - 2025/02/24
+
+- First pre-release
