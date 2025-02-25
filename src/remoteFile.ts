@@ -30,10 +30,12 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         vscode.workspace.onDidCloseTextDocument(this.onDidCloseTextDocument.bind(this));
         vscode.workspace.onDidSaveTextDocument(this.onDidSaveTextDocument.bind(this));
         vscode.window.onDidChangeVisibleTextEditors(this.onDidChangeVisibleTextEditors.bind(this));
-
+    
         const treeView = vscode.window.createTreeView('remoteFilesView', { treeDataProvider: this });
         treeView.onDidExpandElement(this.onDidExpandElement.bind(this));
         treeView.onDidCollapseElement(this.onDidCollapseElement.bind(this));
+    
+        vscode.commands.registerCommand('sshMultiConnect.createRemoteFolder', this.createRemoteFolder.bind(this));
     }
 
     setTitleItem(titleItem: RemoteFileViewTitle) {
@@ -99,6 +101,25 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
         const resourceUri = vscode.Uri.parse(`ssh://${this.connection.username}@${this.connection.host}:${this.connection.port}${resourceUriPath}`);
         return new RemoteFileTreeItem(resourceUri, item.attrs.isDirectory() ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None, this.connection, item.attrs.isDirectory());
+    }
+
+    private async createRemoteFolder(node: RemoteFileTreeItem) {
+        const folderName = await vscode.window.showInputBox({ prompt: 'Enter the name of the new remote folder' });
+        if (!folderName) {
+            return;
+        }
+    
+        const remotePath = `${node.resourceUri.path}/${folderName}`;
+        try {
+            if (!this.sftp) {
+                this.sftp = await sftpUtils.getSFTPClient(this.connection.client!);
+            }
+            await sftpUtils.createRemoteDirectory(this.sftp, remotePath);
+            vscode.window.showInformationMessage(`Folder created: ${remotePath}`);
+            this.refresh();
+        } catch (error: any) {
+            vscode.window.showErrorMessage(`Error creating folder: ${error.message}`);
+        }
     }
 
     private onDidExpandElement(event: vscode.TreeViewExpansionEvent<vscode.TreeItem>): void {
@@ -244,7 +265,7 @@ export class RemoteFileTreeItem extends vscode.TreeItem {
         super(resourceUri, collapsibleState);
         this.tooltip = resourceUri.fsPath;
         this.description = resourceUri.fsPath;
-        this.contextValue = 'remoteFile';
+        this.contextValue = isDirectory ? 'remoteDirectory' : 'remoteFile';
         this.command = isDirectory ? undefined : {
             command: 'sshMultiConnect.openRemoteFile',
             title: 'Open File',
