@@ -59,3 +59,15 @@ export function uploadRemoteFile(sftp: any, localPath: string, remotePath: strin
         });
     });
 }
+
+export function createRemoteDirectory(sftp: any, remotePath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        sftp.mkdir(remotePath, (err: any) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        });
+    });
+}
