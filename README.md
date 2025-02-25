@@ -29,6 +29,13 @@ This extension contributes the following settings:
 
 Below some last release note, for more details see the CHANGELOG.md
 
-## [0.0.1] - 2025/02/24
+## [0.0.2] - 2025/02/25
+
+### Added
+- Added support for detecting and installing `sshpass` on various Linux distributions.
+- Added the ability to create a new folder in the remote file view.
+- Added a refresh button to the remote file view for manual refresh.
+
+### [0.0.1] - 2025/02/24
 
 - First pre-release

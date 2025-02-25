@@ -209,11 +209,17 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
         return element;
     }
 
+    // Method to get the children of a tree item
     getChildren(element?: SSHConnectionTreeItem): Thenable<SSHConnectionTreeItem[]> {
         if (!element) {
             return Promise.resolve(this.connections.map(conn => new SSHConnectionTreeItem(conn, !!conn.client)));
         }
         return Promise.resolve([]);
+    }
+
+    // Method to get the selected connection
+    getSelectedConnection(): SSHConnection | undefined {
+        return this.selectedConnection;
     }
 
     loadSSHConnections() {
