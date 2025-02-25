@@ -2,17 +2,18 @@
   "name": "ssh-multi-connect",
   "displayName": "SSH Multi Connect",
   "description": "This extension 'ssh-multi-connect' allows you to manage multiple SSH connections with terminals and remote files directly from Visual Studio Code at same time.",
+  "icon": "resources/icon.png",
   "license": "GPL-3.0-only",
   "author": {
     "name": "STeXE89",
     "email": "stexe@systemfailure.it",
-    "url": "https://github.com/STeXE89"
+    "url": "https://systemfailure.it"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/STeXE89/ssh-multi-connect.git"
   },
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "STeXE89",
   "engines": {
     "vscode": "^1.96.0"
@@ -53,6 +54,18 @@
         "icon": "$(file-code)",
         "title": "Open Remote File",
         "tooltip": "Open Remote File"
+      },
+      {
+        "command": "sshMultiConnect.createRemoteFolder",
+        "icon": "$(new-folder)",
+        "title": "Create New Folder",
+        "tooltip": "Create New Folder"
+      },
+      {
+        "command": "sshMultiConnect.refreshRemoteFiles",
+        "icon": "$(sync)",
+        "title": "Refresh Remote Files",
+        "tooltip": "Refresh Remote Files"
       }
     ],
     "viewsContainers": {
@@ -84,6 +97,11 @@
           "command": "sshMultiConnect.addConnection",
           "when": "view == sshConnectionsView",
           "group": "navigation"
+        },
+        {
+          "command": "sshMultiConnect.refreshRemoteFiles",
+          "when": "view == remoteFilesView",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -100,6 +118,11 @@
         {
           "command": "sshMultiConnect.removeConnection",
           "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
+          "group": "inline"
+        },
+        {
+          "command": "sshMultiConnect.createRemoteFolder",
+          "when": "viewItem == remoteDirectory",
           "group": "inline"
         }
       ],
@@ -119,7 +142,9 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "generate-readme": "node generate-readme.js"
+    "generate-readme": "node generate-readme.js",
+    "publish": "vsce publish --target linux-x64 linux-arm64 linux-armhf",
+    "publish:pre-release": "vsce publish --pre-release --target linux-x64 linux-arm64 linux-armhf"
   },
   "dependencies": {
     "ssh2": "^1.16.0",

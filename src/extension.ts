@@ -3,8 +3,11 @@ import * as fileUtils from './utils/fileUtils';
 import { SSHViewProvider, SSHConnectionTreeItem, addSSHConnection } from './sshConnection';
 import { EmptyRemoteFileProvider } from './remoteFile';
 import { SSH_CONFIG_PATH } from './constants/sshConstants';
+import { checkAndInstallSshpass } from './utils/sshUtils';
 
 export function activate(context: vscode.ExtensionContext) {
+    checkAndInstallSshpass();
+
     const sshViewProvider = new SSHViewProvider(context);
     const sshTreeView = vscode.window.createTreeView('sshConnectionsView', {
         treeDataProvider: sshViewProvider
@@ -26,7 +29,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    vscode.window.onDidCloseTerminal((terminal) => {
+    vscode.window.onDidCloseTerminal(terminal => {
         sshViewProvider.handleTerminalClose(terminal);
     });
 
@@ -61,6 +64,19 @@ function registerCommands(context: vscode.ExtensionContext, sshViewProvider: SSH
             } else {
                 vscode.window.showErrorMessage('Invalid connection ID.');
             }
+        }},
+        { command: 'sshMultiConnect.refreshRemoteFiles', callback: () => {
+            const sshConnection = sshViewProvider.getSelectedConnection();
+            if (sshConnection) {
+                const remoteFileProvider = sshViewProvider.getRemoteFileProvider(sshConnection.id);
+                if (remoteFileProvider) {
+                    remoteFileProvider.refresh();
+                } else {
+                    vscode.window.showErrorMessage('No remote file provider found.');
+                }
+            } else {
+                vscode.window.showErrorMessage('No active connection selected.');
+            }
         }}
     ];
 
@@ -72,7 +88,7 @@ function registerCommands(context: vscode.ExtensionContext, sshViewProvider: SSH
 async function monitorSSHConfigFile(context: vscode.ExtensionContext, sshViewProvider: SSHViewProvider) {
     try {
         await fileUtils.readFileAsync(SSH_CONFIG_PATH); // Check if file exists
-        const watcher = fileUtils.watchFile(SSH_CONFIG_PATH, (eventType) => {
+        const watcher = fileUtils.watchFile(SSH_CONFIG_PATH, eventType => {
             if (eventType === 'change') {
                 sshViewProvider.loadSSHConnections();
             }
