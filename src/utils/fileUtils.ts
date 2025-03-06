@@ -45,6 +45,21 @@ export function fileExists(filePath: string): boolean {
     return fs.existsSync(filePath);
 }
 
+export function ensureFileExists(filePath: string, mode: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (!fs.existsSync(filePath)) {
+            try {
+                fs.writeFileSync(filePath, '', { mode });
+                resolve();
+            } catch (error) {
+                reject(error);
+            }
+        } else {
+            resolve();
+        }
+    });
+}
+
 export function chmodSync(filePath: string, mode: fs.Mode): void {
     fs.chmodSync(filePath, mode);
 }
@@ -78,5 +93,17 @@ export function watchFile(filePath: string, listener: (eventType: string, filena
         if (filename) {
             listener(eventType, filename);
         }
+    });
+}
+
+export function writeFileAsync(filePath: string, data: string, mode: number): Promise<void> {
+    return new Promise((resolve, reject) => {
+        fs.writeFile(filePath, data, { mode }, (err) => {
+            if (err) {
+                reject(err);
+            } else {
+                resolve();
+            }
+        });
     });
 }

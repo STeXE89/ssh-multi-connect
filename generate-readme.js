@@ -5,7 +5,7 @@ const packageJson = require('./package.json');
 const changelog = fs.readFileSync(path.join(__dirname, 'CHANGELOG.md'), 'utf-8');
 
 // Regular expression to match release notes with descriptions
-const releaseNotesRegex = /## \[\d+\.\d+\.\d+\].*?(?=\s*\n## |$)/gs;
+const releaseNotesRegex = /## \[\d+\.\d+\.\d+\].*?(?=\s*\r\n## |$)/gs;
 const releaseNotes = changelog.match(releaseNotesRegex) || [];
 const limitedReleaseNotes = releaseNotes.slice(0, 10).join('\n');
 
