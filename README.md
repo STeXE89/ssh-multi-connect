@@ -29,6 +29,14 @@ This extension contributes the following settings:
 
 Below some last release note, for more details see the CHANGELOG.md
 
+## [0.0.4] - 2025/03/06
+
+### Added
+- Added the ability to create a new file in the remote file view.
+
+### Fixed
+- Removed refused commands on remote file view.
+
 ## [0.0.3] - 2025/03/05
 
 ### Added

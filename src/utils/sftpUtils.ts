@@ -60,6 +60,24 @@ export function uploadRemoteFile(sftp: any, localPath: string, remotePath: strin
     });
 }
 
+export function createRemoteFile(sftp: any, remotePath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+        sftp.open(remotePath, 'w', (err: any, handle: any) => {
+            if (err) {
+                reject(err);
+            } else {
+                sftp.close(handle, (closeErr: any) => {
+                    if (closeErr) {
+                        reject(closeErr);
+                    } else {
+                        resolve();
+                    }
+                });
+            }
+        });
+    });
+}
+
 export function createRemoteDirectory(sftp: any, remotePath: string): Promise<void> {
     return new Promise((resolve, reject) => {
         sftp.mkdir(remotePath, (err: any) => {
