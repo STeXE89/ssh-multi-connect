@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fileUtils from './utils/fileUtils';
 import * as sftpUtils from './utils/sftpUtils';
-import { SSHConnection } from './sshConnection';
+import { ExtendedSSHConnection } from './sshConnection';
 
 export class RemoteFileViewTitle extends vscode.TreeItem {
     constructor(label: string) {
@@ -12,6 +12,8 @@ export class RemoteFileViewTitle extends vscode.TreeItem {
 }
 
 export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+    private static connectionProviders: Map<string, RemoteFileProvider> = new Map();
+
     private _onDidChangeTreeData: vscode.EventEmitter<vscode.TreeItem | undefined | void> = new vscode.EventEmitter<vscode.TreeItem | undefined | void>();
     readonly onDidChangeTreeData: vscode.Event<vscode.TreeItem | undefined | void> = this._onDidChangeTreeData.event;
 
@@ -21,22 +23,53 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
     private tempFileMap: Map<string, string> = new Map();
     private fileLists: Map<string, RemoteFileTreeItem[]> = new Map();
 
-    constructor(private connection: SSHConnection, private currentPath: string) {
+    constructor(private connection: ExtendedSSHConnection, private currentPath: string) {
         this.refresh();
         this.registerEventListeners();
+    }
+
+    // Static method to get a provider by connection ID
+    public static getProviderByConnectionId(connectionId: string): RemoteFileProvider | undefined {
+        return RemoteFileProvider.connectionProviders.get(connectionId);
+    }
+
+    // Static method to create or retrieve a provider
+    public static createOrGetProvider(connection: ExtendedSSHConnection, currentPath: string): RemoteFileProvider {
+        let provider = RemoteFileProvider.getProviderByConnectionId(connection.id);
+        if (!provider) {
+            provider = new RemoteFileProvider(connection, currentPath);
+            RemoteFileProvider.connectionProviders.set(connection.id, provider);
+        }
+        return provider;
+    }
+
+    // Static method to remove a provider by connection ID
+    public static removeProviderByConnectionId(connectionId: string): void {
+        RemoteFileProvider.connectionProviders.delete(connectionId);
     }
 
     private registerEventListeners() {
         vscode.workspace.onDidCloseTextDocument(this.onDidCloseTextDocument.bind(this));
         vscode.workspace.onDidSaveTextDocument(this.onDidSaveTextDocument.bind(this));
         vscode.window.onDidChangeVisibleTextEditors(this.onDidChangeVisibleTextEditors.bind(this));
-    
+
         const treeView = vscode.window.createTreeView('remoteFilesView', { treeDataProvider: this });
         treeView.onDidExpandElement(this.onDidExpandElement.bind(this));
         treeView.onDidCollapseElement(this.onDidCollapseElement.bind(this));
-    
-        vscode.commands.registerCommand('sshMultiConnect.createRemoteFile', this.createRemoteFile.bind(this));
-        vscode.commands.registerCommand('sshMultiConnect.createRemoteFolder', this.createRemoteFolder.bind(this));
+
+        const createRemoteFileCommand = 'sshMultiConnect.createRemoteFile';
+        vscode.commands.getCommands().then(commands => {
+            if (!commands.includes(createRemoteFileCommand)) {
+                vscode.commands.registerCommand(createRemoteFileCommand, this.createRemoteFile.bind(this));
+            }
+        });
+
+        const createRemoteFolderCommand = 'sshMultiConnect.createRemoteFolder';
+        vscode.commands.getCommands().then(commands => {
+            if (!commands.includes(createRemoteFolderCommand)) {
+                vscode.commands.registerCommand(createRemoteFolderCommand, this.createRemoteFolder.bind(this));
+            }
+        });
     }
 
     setTitleItem(titleItem: RemoteFileViewTitle) {
@@ -44,7 +77,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         this.refresh();
     }
 
-    updateConnection(connection: SSHConnection, remotePath: string) {
+    updateConnection(connection: ExtendedSSHConnection, remotePath: string) {
         this.connection = connection;
         this.currentPath = remotePath;
         this.refresh();
@@ -73,21 +106,24 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
     private async fetchRemoteFiles(remotePath: string): Promise<RemoteFileTreeItem[]> {
         try {
+            if (!this.connection.client) {
+                vscode.window.showErrorMessage('SSH connection is not established.');
+                return [];
+            }
             if (!this.sftp) {
-                this.sftp = await sftpUtils.getSFTPClient(this.connection.client!);
+                this.sftp = await sftpUtils.getSFTPClient(this.connection.client);
             }
             const list = await sftpUtils.readRemoteDirectory(this.sftp, remotePath);
-
+    
             const sortedList = this.sortRemoteFiles(list);
             this.fileLists.set(remotePath, sortedList);
-
+    
             return sortedList.map(item => this.createRemoteFileTreeItem(remotePath, item));
         } catch (error: any) {
             vscode.window.showErrorMessage(`Error fetching remote files: ${error.message}`);
             return [];
         }
     }
-
     private sortRemoteFiles(list: any[]): any[] {
         const directories = list.filter(item => item.attrs.isDirectory()).sort((a, b) => a.filename.toLowerCase().localeCompare(b.filename.toLowerCase()));
         const files = list.filter(item => !item.attrs.isDirectory()).sort((a, b) => a.filename.toLowerCase().localeCompare(b.filename.toLowerCase()));
@@ -104,7 +140,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         if (resourceUriPath.startsWith('//')) {
             resourceUriPath = resourceUriPath.slice(1);
         }
-        return vscode.Uri.parse(`ssh://${this.connection.username}@${this.connection.host}:${this.connection.port}${resourceUriPath}`);
+        return vscode.Uri.parse(`ssh://${this.connection.user}@${this.connection.hostname}:${this.connection.port}${resourceUriPath}`);
     }
 
     private async createRemoteFile(node: RemoteFileTreeItem) {
@@ -255,19 +291,23 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         await vscode.window.showTextDocument(document);
     }
 
-    public async cleanup() {
+    public cleanup(): void {
+        // Perform cleanup and remove this provider from the static map
+        RemoteFileProvider.removeProviderByConnectionId(this.connection.id);
+
         for (const document of vscode.workspace.textDocuments) {
             const filePath = document.uri.fsPath;
             if (this.tempFiles.has(filePath)) {
-                await vscode.window.showTextDocument(document);
-                await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+                vscode.window.showTextDocument(document).then(() => {
+                    vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+                });
             }
         }
 
         for (const files of this.tempFiles.values()) {
             for (const filePath of files) {
                 try {
-                    await fileUtils.deleteFile(filePath);
+                    fileUtils.deleteFile(filePath);
                 } catch (err) {
                     console.error(`Failed to delete temporary file: ${filePath}`, err);
                 }
@@ -281,7 +321,7 @@ export class RemoteFileTreeItem extends vscode.TreeItem {
     constructor(
         public readonly resourceUri: vscode.Uri,
         collapsibleState: vscode.TreeItemCollapsibleState,
-        private readonly connection: SSHConnection,
+        private readonly connection: ExtendedSSHConnection,
         public readonly isDirectory: boolean
     ) {
         super(resourceUri, collapsibleState);

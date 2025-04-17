@@ -2,6 +2,21 @@
 
 All notable changes to the "ssh-multi-connect" extension will be documented in this file.
 
+## [0.0.5] - 2025/04/17
+
+### Added
+- Added support for SSH folder grouping, allowing users to Organize SSH connections into groups for easier navigation and management.
+
+### Fixed
+- Resolved an issue where `sshpass` detection failed on certain Linux distributions due to incorrect path handling.
+- Fixed a bug causing intermittent failures when refreshing the remote file view, ensuring consistent updates to the file list.
+- Addressed minor UI glitches in the remote file view when handling large directories.
+
+### Changed
+- Reworked `sshutils` to improve code maintainability and performance, including refactoring SSH connection handling and error management.
+- Improved the performance of the remote file view refresh operation by optimizing the underlying SSH commands and reducing redundant network calls.
+- Enhanced error messages for failed SSH connections to provide more actionable feedback to users.
+
 ## [0.0.4] - 2025/03/06
 
 ### Added

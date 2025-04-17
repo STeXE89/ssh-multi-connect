@@ -20,6 +20,8 @@ ${packageJson.description}
 - Connect and disconnect from SSH servers.
 - Browse and manage remote files.
 - Open remote files in the editor and save changes back to the server.
+- Open remote files in the editor and save changes back to the server.
+- Organize SSH connections into groups for easy access.
 
 ## Requirements
 
