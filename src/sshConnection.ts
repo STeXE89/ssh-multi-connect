@@ -123,9 +123,9 @@ export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
 
 // Function to check if the host is in known_hosts
 async function checkKnownHosts(connection: ExtendedSSHConnection): Promise<boolean> {
-    const { host } = connection;
+    const { hostname } = connection;
     try {
-        const { exists } = isKnownHost(host);
+        const { exists } = isKnownHost(hostname);
         return exists;
     } catch (error) {
         console.error(`Error during known hosts check: ${error instanceof Error ? error.message : error}`);
@@ -135,21 +135,21 @@ async function checkKnownHosts(connection: ExtendedSSHConnection): Promise<boole
 
 // Function to update the known_hosts file
 async function updateKnownHosts(connection: ExtendedSSHConnection): Promise<void> {
-    const { host } = connection;
+    const { hostname } = connection;
     try {
-        const fingerprint = getHostKeyFromKeyscan(host);
-        const { exists, key: existingFingerprint } = isKnownHost(host);
+        const fingerprint = getHostKeyFromKeyscan(hostname);
+        const { exists, key: existingFingerprint } = isKnownHost(hostname);
 
         if (exists) {
             if (existingFingerprint !== fingerprint) {
                 const selection = await vscode.window.showWarningMessage(
-                    `The host key fingerprint for ${host} has changed. Do you want to update it?`,
+                    `The host key fingerprint for ${hostname} has changed. Do you want to update it?`,
                     'Yes', 'No'
                 );
 
                 if (selection === 'Yes') {
-                    removeKnownHost(host);
-                    addKnownHost(host, fingerprint);
+                    removeKnownHost(hostname);
+                    addKnownHost(hostname, fingerprint);
                 } else {
                     throw new Error('Host key fingerprint update declined by user.');
                 }
@@ -460,11 +460,11 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
                 // Host is not in known_hosts, try to connect and then add the host key                
                 try {
                     await this.tryConnect(connection, treeItem);
-                    const newHostKey = getHostKeyFromKeyscan(connection.host);
-                    addKnownHost(connection.host, newHostKey);
-                    vscode.window.showInformationMessage(`Host "${connection.host}" added to known_hosts.`);
+                    const newHostKey = getHostKeyFromKeyscan(connection.hostname);
+                    addKnownHost(connection.hostname, newHostKey);
+                    vscode.window.showInformationMessage(`Host "${connection.hostname}" added to known_hosts.`);
                 } catch (error) {
-                    vscode.window.showErrorMessage(`Failed to add host "${connection.host}" to known_hosts: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    vscode.window.showErrorMessage(`Failed to add host "${connection.hostname}" to known_hosts: ${error instanceof Error ? error.message : 'Unknown error'}`);
                     this.removeConnectionFromList(connection);
                 }
             } else {
