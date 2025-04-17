@@ -13,7 +13,7 @@
     "type": "git",
     "url": "https://github.com/STeXE89/ssh-multi-connect.git"
   },
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "STeXE89",
   "engines": {
     "vscode": "^1.96.0"
@@ -48,6 +48,12 @@
         "icon": "$(trash)",
         "title": "Remove SSH Connection",
         "tooltip": "Remove SSH Connection"
+      },
+      {
+        "command": "sshMultiConnect.moveToFolder",
+        "icon": "$(move)",
+        "title": "Move to Folder",
+        "tooltip": "Move to Folder"
       },
       {
         "command": "sshMultiConnect.openRemoteFile",
@@ -88,11 +94,12 @@
         {
           "id": "sshConnectionsView",
           "name": "SSH Connections",
-          "icon": "resources/ssh_icon.png"
+          "icon": "resources/icon.png"
         },
         {
           "id": "remoteFilesView",
           "name": "Remote Files",
+          "icon": "resources/icon.png",
           "contextualTitle": "${remoteFileViewTitle}"
         }
       ]
@@ -123,6 +130,11 @@
         },
         {
           "command": "sshMultiConnect.removeConnection",
+          "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
+          "group": "inline"
+        },
+        {
+          "command": "sshMultiConnect.moveToFolder",
           "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
           "group": "inline"
         },

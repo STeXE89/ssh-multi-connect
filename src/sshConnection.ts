@@ -1,21 +1,16 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
+import { ProviderResult } from 'vscode';
 import * as fileUtils from './utils/fileUtils';
-import { spawn } from 'child_process';
 import { Client, utils } from 'ssh2';
 import { RemoteFileProvider, RemoteFileViewTitle, EmptyRemoteFileProvider } from './remoteFile';
-import { SSH_CONFIG_DIR, SSH_CONFIG_PATH, SSH_KNOWN_HOSTS_PATH, SSH_DEFAULT_PORT } from './constants/sshConstants';
+import { SSH_DEFAULT_PORT, SSHConnection, insertOrUpdateConnection, getAllConnections, removeConnection, createIdentityFile, getIdentityFile, addKnownHost, removeKnownHost, isKnownHost, getHostKeyFromKeyscan } from './utils/sshUtils';
 
 // SSHConnection Interface
-export interface SSHConnection {
+export interface ExtendedSSHConnection extends SSHConnection {
     id: string;
-    host: string;
-    username: string;
-    port?: string;
     client?: Client;
     usePrivateKey?: boolean;
     password?: string;
-    privateKeyPath?: string;
     privateKey?: Buffer;
     passphrase?: string;
     fingerprint?: string;
@@ -30,11 +25,13 @@ export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
             return;
         }
 
-        const username = await vscode.window.showInputBox({ placeHolder: 'Username' });
-        if (!username) {
-            vscode.window.showErrorMessage('Username is required.');
+        const hostname = await vscode.window.showInputBox({ placeHolder: 'HostName' });
+        if (!hostname) {
+            vscode.window.showErrorMessage('HostName is required.');
             return;
         }
+
+        const user = await vscode.window.showInputBox({ placeHolder: 'Username' });
 
         const port = await vscode.window.showInputBox({ placeHolder: `Port (default ${SSH_DEFAULT_PORT})`, value: SSH_DEFAULT_PORT.toString() });
         const usePrivateKey = await vscode.window.showQuickPick(['Yes', 'No'], {
@@ -45,29 +42,25 @@ export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
             return;
         }
 
-        let privateKeyPath = '';
+        let identityFile: string | undefined;
         if (usePrivateKey === 'Yes') {
-            const destinationPrivateKeyPath = path.join(SSH_CONFIG_DIR, `${username}_${host}_key`);
+            // Use the utility function to create the identity file
+            identityFile = createIdentityFile(host);
 
-            fileUtils.ensureDirectoryExists(SSH_CONFIG_DIR, 0o700);
-
-            if (fileUtils.fileExists(destinationPrivateKeyPath)) {
-                const document = await vscode.workspace.openTextDocument(destinationPrivateKeyPath);
-                await vscode.window.showTextDocument(document);
-            } else {
-                fileUtils.writeFile(destinationPrivateKeyPath, '', 0o600);
-
-                const document = await vscode.workspace.openTextDocument(destinationPrivateKeyPath);
-                await vscode.window.showTextDocument(document);
-            }
+            // Open the identity file for the user to paste the private key
+            const document = await vscode.workspace.openTextDocument(identityFile);
+            await vscode.window.showTextDocument(document);
 
             // Show the warning message and wait for the user to confirm they have pasted the key
             await vscode.window.showWarningMessage('Paste your SSH private key into the opened file and save it, then click Done.', 'Done');
 
-            // Wait for the user to press Done and for the editor to no longer be dirty
+            // Wait for the user to save the file
             await new Promise<void>(resolve => {
                 const interval = setInterval(async () => {
-                    const editorContent = await vscode.workspace.openTextDocument(destinationPrivateKeyPath);
+                    if (!identityFile) {
+                        throw new Error('Identity file path is undefined.');
+                    }
+                    const editorContent = await vscode.workspace.openTextDocument(identityFile);
                     if (!editorContent.isDirty) {
                         clearInterval(interval);
                         resolve();
@@ -75,7 +68,7 @@ export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
                 }, 1000);
             });
 
-            const privateKeyContent = fileUtils.readFile(destinationPrivateKeyPath);
+            const privateKeyContent = fileUtils.readFile(identityFile);
             if (!privateKeyContent) {
                 vscode.window.showErrorMessage('SSH Private Key is required.');
                 return;
@@ -83,38 +76,40 @@ export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
 
             // Close the editor
             await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-            privateKeyPath = destinationPrivateKeyPath;
         }
 
-        fileUtils.ensureDirectoryExists(SSH_CONFIG_DIR, 0o700);
-
-        if (!fileUtils.fileExists(SSH_CONFIG_PATH)) {
-            fileUtils.writeFile(SSH_CONFIG_PATH, '', 0o600);
-        }
-
-        const existingConnection = sshViewProvider.connections.find((conn: SSHConnection) => conn.host === host && conn.username === username);
+        const existingConnection = sshViewProvider.connections.find((conn: ExtendedSSHConnection) => conn.host === host && conn.user === user);
         if (existingConnection) {
-            vscode.window.showInformationMessage(`Connection to ${host} as ${username} already exists.`);
+            vscode.window.showInformationMessage(`Connection to ${host} as ${user} already exists.`);
             return;
         }
 
-        const newConnection = `Host ${host}\n    HostName ${host}\n    User ${username}\n    Port ${port ?? SSH_DEFAULT_PORT}\n`;
-        fileUtils.appendToFile(SSH_CONFIG_PATH, newConnection + (usePrivateKey === 'Yes' ? `    IdentityFile ${privateKeyPath}\n` : '') + '\n');
+        const newConnection = {
+            host,
+            hostname,
+            user,
+            port: port ? parseInt(port) : SSH_DEFAULT_PORT,
+            identityFile: usePrivateKey === 'Yes' ? identityFile : undefined
+        };
+
+        // Use the utility function to insert or update the connection in the SSH config
+        insertOrUpdateConnection(newConnection);
 
         sshViewProvider.loadSSHConnections();
 
         sshViewProvider.connections.push({
             id: host,
             host,
-            username,
-            port: port ?? SSH_DEFAULT_PORT.toString(),
+            hostname,
+            user,
+            port: port ? parseInt(port) : SSH_DEFAULT_PORT,
             usePrivateKey: usePrivateKey === 'Yes',
-            privateKeyPath: usePrivateKey === 'Yes' ? privateKeyPath : undefined
+            identityFile: usePrivateKey === 'Yes' ? identityFile : undefined
         });
 
         const uniqueConnections = sshViewProvider.connections.filter((conn, index, self) =>
             index === self.findIndex((c) => (
-                c.host === conn.host && c.username === conn.username
+                c.host === conn.host && c.user === conn.user
             ))
         );
 
@@ -126,62 +121,55 @@ export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
     }
 }
 
-// Function to check and manage host fingerprints
-async function checkAndUpdateKnownHosts(connection: SSHConnection): Promise<void> {
-    return new Promise((resolve, reject) => {
-        const { host } = connection;
+// Function to check if the host is in known_hosts
+async function checkKnownHosts(connection: ExtendedSSHConnection): Promise<boolean> {
+    const { host } = connection;
+    try {
+        const { exists } = isKnownHost(host);
+        return exists;
+    } catch (error) {
+        console.error(`Error during known hosts check: ${error instanceof Error ? error.message : error}`);
+        throw new Error(`Failed to check known hosts: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+}
 
-        fileUtils.readFileAsync(SSH_KNOWN_HOSTS_PATH).then(data => {
-            const knownHostsLines = data ? data.split('\n') : [];
-            const hostPattern = new RegExp(`^${host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[\\s,].*)?$`, 'm');
-            const isHostKnown = knownHostsLines.some(line => hostPattern.test(line));
+// Function to update the known_hosts file
+async function updateKnownHosts(connection: ExtendedSSHConnection): Promise<void> {
+    const { host } = connection;
+    try {
+        const fingerprint = getHostKeyFromKeyscan(host);
+        const { exists, key: existingFingerprint } = isKnownHost(host);
 
-            if (isHostKnown) {
-                resolve();
-                return;
-            }
+        if (exists) {
+            if (existingFingerprint !== fingerprint) {
+                const selection = await vscode.window.showWarningMessage(
+                    `The host key fingerprint for ${host} has changed. Do you want to update it?`,
+                    'Yes', 'No'
+                );
 
-            // Use ssh-keyscan to fetch the host key and add it to known_hosts
-            const keyscan = spawn('ssh-keyscan', ['-H', host]);
-
-            keyscan.stdout.on('data', (data: Buffer) => {
-                fileUtils.appendFileAsync(SSH_KNOWN_HOSTS_PATH, data.toString()).then(() => {
-                    resolve();
-                }).catch(err => {
-                    reject(new Error(`Error appending to known_hosts file: ${err.message}`));
-                });
-            });
-
-            keyscan.stderr.on('data', (data: Buffer) => {
-                console.error(`ssh-keyscan error: ${data.toString()}`);
-            });
-
-            keyscan.on('error', (error: Error) => {
-                reject(new Error(`ssh-keyscan failed: ${error.message}`));
-            });
-
-            keyscan.on('close', (code: number) => {
-                if (code !== 0) {
-                    reject(new Error(`ssh-keyscan exited with code ${code}`));
+                if (selection === 'Yes') {
+                    removeKnownHost(host);
+                    addKnownHost(host, fingerprint);
+                } else {
+                    throw new Error('Host key fingerprint update declined by user.');
                 }
-            });
-        }).catch(err => {
-            if (err.code !== 'ENOENT') {
-                reject(new Error(`Error reading known_hosts file: ${err.message}`));
-            } else {
-                resolve();
             }
-        });
-    });
+        } else {
+            throw new Error('Host is not in known_hosts.');
+        }
+    } catch (error) {
+        console.error(`Error during known hosts update: ${error instanceof Error ? error.message : error}`);
+        throw new Error(`Failed to update known hosts: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
 }
 
 // Main class for managing SSH connections
-export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTreeItem> {
+export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTreeItem | SSHFolderTreeItem> {
     private _onDidChangeTreeData: vscode.EventEmitter<SSHConnectionTreeItem | undefined | void> = new vscode.EventEmitter<SSHConnectionTreeItem | undefined | void>();
     readonly onDidChangeTreeData: vscode.Event<SSHConnectionTreeItem | undefined | void> = this._onDidChangeTreeData.event;
 
-    public connections: SSHConnection[] = [];
-    private selectedConnection?: SSHConnection;
+    public connections: ExtendedSSHConnection[] = [];
+    private selectedConnection?: ExtendedSSHConnection;
     private terminals: Map<string, vscode.Terminal> = new Map();
     private remoteFileProviders: Map<string, RemoteFileProvider> = new Map();
 
@@ -210,50 +198,107 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
     }
 
     // Method to get the children of a tree item
-    getChildren(element?: SSHConnectionTreeItem): Thenable<SSHConnectionTreeItem[]> {
+    getChildren(element?: SSHConnectionTreeItem | SSHFolderTreeItem): Thenable<(SSHConnectionTreeItem | SSHFolderTreeItem)[]> | ProviderResult<SSHConnectionTreeItem[]> {
         if (!element) {
-            return Promise.resolve(this.connections.map(conn => new SSHConnectionTreeItem(conn, !!conn.client)));
+            // Root level: Group connections by top-level folder
+            const folderMap = new Map<string, ExtendedSSHConnection[]>();
+            const rootConnections: ExtendedSSHConnection[] = [];
+    
+            for (const connection of this.connections) {
+                if (connection.vFolderTag) {
+                    const topLevelFolder = connection.vFolderTag.split('/')[0]; // Extract the top-level folder
+                    if (!folderMap.has(topLevelFolder)) {
+                        folderMap.set(topLevelFolder, []);
+                    }
+                    folderMap.get(topLevelFolder)!.push(connection);
+                } else {
+                    rootConnections.push(connection); // Add connections without vFolderTag to root
+                }
+            }
+    
+            // Create folder items for top-level folders
+            const folderItems = Array.from(folderMap.keys()).map(folderName => new SSHFolderTreeItem(folderName));
+            const rootItems = rootConnections.map(conn => new SSHConnectionTreeItem(conn, !!conn.client));
+    
+            // Combine folder items and root connections
+            return Promise.resolve([...folderItems, ...rootItems]);
+        } else if (element instanceof SSHFolderTreeItem) {
+            // Subfolder level: Filter connections and subfolders within the current folder
+            const currentFolder = element.folderName;
+            const subFolderMap = new Map<string, ExtendedSSHConnection[]>();
+            const folderConnections: ExtendedSSHConnection[] = [];
+    
+            for (const connection of this.connections) {
+                if (connection.vFolderTag && connection.vFolderTag.startsWith(`${currentFolder}/`)) {
+                    const remainingPath = connection.vFolderTag.substring(currentFolder.length + 1); // Remove the current folder prefix
+                    const nextFolder = remainingPath.split('/')[0]; // Extract the next folder or connection
+    
+                    // It's a subfolder
+                    if (!subFolderMap.has(nextFolder)) {
+                        subFolderMap.set(nextFolder, []);
+                    }
+                    subFolderMap.get(nextFolder)!.push(connection);
+    
+                } else if (connection.vFolderTag === currentFolder) {
+                    // Directly add connections that belong to the current folder
+                    folderConnections.push(connection);
+                }
+            }
+    
+            // Recursively create subfolder items
+            const subFolderItems = Array.from(subFolderMap.keys()).map(subFolderName => new SSHFolderTreeItem(`${currentFolder}/${subFolderName}`));
+            const connectionItems = folderConnections.map(conn => new SSHConnectionTreeItem(conn, !!conn.client));
+    
+            // Combine subfolder items and connections
+            return Promise.resolve([...subFolderItems, ...connectionItems]);
         }
+    
         return Promise.resolve([]);
     }
 
     // Method to get the selected connection
-    getSelectedConnection(): SSHConnection | undefined {
+    getSelectedConnection(): ExtendedSSHConnection | undefined {
         return this.selectedConnection;
     }
 
     loadSSHConnections() {
-        if (fileUtils.fileExists(SSH_CONFIG_PATH)) {
-            const configFile = fileUtils.readFile(SSH_CONFIG_PATH);
-            const configLines = configFile.split('\n');
-            let currentHost: SSHConnection | null = null;
-            this.connections = [];
-
-            configLines.forEach(line => {
-                const trimmedLine = line.trim();
-                if (trimmedLine.startsWith('Host ')) {
-                    if (currentHost) {
-                        this.connections.push(currentHost);
+        try {
+            const connections = getAllConnections();
+    
+            this.connections = connections
+                .filter(conn => conn.host) // Ensure host is defined
+                .map(conn => ({
+                    ...conn,
+                    id: conn.host,
+                    client: undefined,
+                    usePrivateKey: !!conn.identityFile,
+                    vFolderTag: conn.vFolderTag,
+                }))
+                .sort((a, b) => {
+                    if (a.vFolderTag && b.vFolderTag) {
+                        return a.vFolderTag.localeCompare(b.vFolderTag);
+                    } else if (a.vFolderTag) {
+                        return -1;
+                    } else if (b.vFolderTag) {
+                        return 1;
                     }
-                    const host = trimmedLine.substring(5).trim();
-                    currentHost = { id: host, host, username: '', port: SSH_DEFAULT_PORT.toString() };
-                } else if (currentHost) {
-                    if (trimmedLine.startsWith('User ')) {
-                        currentHost.username = trimmedLine.substring(5).trim();
-                    } else if (trimmedLine.startsWith('Port ')) {
-                        currentHost.port = trimmedLine.substring(5).trim();
-                    } else if (trimmedLine.startsWith('IdentityFile ')) {
-                        currentHost.usePrivateKey = true;
-                        currentHost.privateKeyPath = trimmedLine.substring(13).trim();
+                    const hostComparison = a.host.localeCompare(b.host);
+                    if (hostComparison !== 0) {
+                        return hostComparison;
                     }
-                }
-            });
-
-            if (currentHost) {
-                this.connections.push(currentHost);
-            }
-
+                    if (a.user === undefined && b.user !== undefined) {
+                        return 1;
+                    }
+                    if (a.user !== undefined && b.user === undefined) {
+                        return -1;
+                    }
+                    return 0;
+                });
+    
             this._onDidChangeTreeData.fire();
+        } catch (error) {
+            console.error('Error loading SSH connections:', error);
+            vscode.window.showErrorMessage('Failed to load SSH connections.');
         }
     }
 
@@ -265,20 +310,21 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
         if (connection.client) {
             this.selectedConnection = connection;
     
-            // Check if a remoteFileProvider already exists for the connection
-            let remoteFileProvider = this.remoteFileProviders.get(connection.id);
-            if (!remoteFileProvider) {
-                remoteFileProvider = new RemoteFileProvider(connection, '/');
-                this.remoteFileProviders.set(connection.id, remoteFileProvider);
-            }
+            // Use the static method to create or get the RemoteFileProvider
+            const remoteFileProvider = RemoteFileProvider.createOrGetProvider(connection, '/');
+            this.remoteFileProviders.set(connection.id, remoteFileProvider);
+    
+            // Register the RemoteFileProvider with the tree view
             vscode.window.registerTreeDataProvider('remoteFilesView', remoteFileProvider);
     
-            // Set the title item to indicate the related connection
+            // Update the title to reflect the current connection
             const titleItem = new RemoteFileViewTitle(`Connected to ${connection.host}`);
             remoteFileProvider.setTitleItem(titleItem);
+            remoteFileProvider.refresh();
         } else {
-            vscode.window.showErrorMessage(`Connection to ${connection.host} is not active. Please reconnect.`);
             this.selectedConnection = undefined;
+    
+            // Reset the remote file view to an empty state
             const emptyProvider = new EmptyRemoteFileProvider();
             const emptyTitleItem = new RemoteFileViewTitle('No Active Connection');
             emptyProvider.setTitleItem(emptyTitleItem);
@@ -287,8 +333,6 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
     
         if (terminal) {
             terminal.show();
-        } else {
-            vscode.window.showErrorMessage(`No terminal found for connection ${connection.username}@${connection.host}`);
         }
     
         vscode.commands.executeCommand('setContext', 'sshConnectionActive', !!this.selectedConnection);
@@ -300,159 +344,228 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
     }
 
     // Method to register a terminal for an SSH connection
-    public registerTerminal(connection: SSHConnection, terminal: vscode.Terminal) {
+    public registerTerminal(connection: ExtendedSSHConnection, terminal: vscode.Terminal) {
         this.terminals.set(connection.id, terminal);
     }
 
     removeConnection(treeItem: SSHConnectionTreeItem) {
         const connection = treeItem.connection;
-
-        if (!connection.host || !connection.username) {
+    
+        if (!connection.host || !connection.user) {
             vscode.window.showErrorMessage('Host and Username are required. Cannot remove connection.');
             return;
         }
-        console.log('Removing connection for host:', connection.host, 'and user:', connection.username);
-
-        let configFile = fileUtils.readFile(SSH_CONFIG_PATH);
-
-        const configLines = configFile.split('\n');
-        let insideHostBlock = false;
-        let blockStartIndex = -1;
-        let blockEndIndex = -1;
-        let foundUser = false;
-
-        for (let i = 0; i < configLines.length; i++) {
-            const line = configLines[i];
-
-            if (/^Host\s/.test(line)) {
-                // If we're inside a block and it matches the criteria, remove it
-                if (insideHostBlock && foundUser) {
-                    configLines.splice(blockStartIndex, blockEndIndex - blockStartIndex + 1);
-                    break;
-                }
-                // Start a new block
-                insideHostBlock = true;
-                blockStartIndex = i;
-                blockEndIndex = i;
-                foundUser = false;
-            } else if (insideHostBlock) {
-                blockEndIndex = i;
-                if (/^\s*User\s+/.test(line)) {
-                    const currentUsername = line.split(/\s+/)[2];
-                    if (currentUsername === connection.username) {
-                        foundUser = true;
-                    }
-                }
+    
+        console.log('Removing connection for host:', connection.host, 'and user:', connection.user);
+    
+        try {
+            // Use the utility function to remove the connection from the SSH config file
+            removeConnection(connection.host);
+    
+            // Remove the connection from the in-memory list
+            this.connections = this.connections.filter(conn => !(conn.host === connection.host && conn.user === connection.user));
+    
+            // Refresh the tree view
+            try {
+                console.log('Firing tree data change event for:', treeItem);
+                this._onDidChangeTreeData.fire(treeItem);
+            } catch (error) {
+                console.error('Error firing tree data change event:', error);
+                vscode.window.showErrorMessage('Failed to refresh the tree view.');
             }
-
-            // If we've reached the last line of the file, check the final block
-            if (i === configLines.length - 1 && insideHostBlock && foundUser) {
-                configLines.splice(blockStartIndex, blockEndIndex - blockStartIndex + 1);
-            }
-        }
-
-        const updatedConfigFile = configLines.join('\n');
-
-        fileUtils.writeFile(SSH_CONFIG_PATH, updatedConfigFile + '\n'.trimStart(), 0o600);
-
-        const finalConfigFile = fileUtils.readFile(SSH_CONFIG_PATH);
-        console.log('Updated config file:\n', finalConfigFile);
-
-        this.connections = this.connections.filter(conn => !(conn.host === connection.host && conn.username === connection.username));
-
-        this._onDidChangeTreeData.fire();
-        console.log('Connection removed from file and list:', connection);
-
-        const terminalName = `${connection.username}@${connection.host}`;
-        vscode.window.terminals.forEach(terminal => {
-            if (terminal.name === terminalName) {
-                terminal.dispose();
-            }
-        });
-
-        if (this.selectedConnection && this.selectedConnection.host === connection.host && this.selectedConnection.username === connection.username) {
-            vscode.commands.executeCommand('setContext', 'sshConnectionActive', false);
-            const remoteFileProvider = new EmptyRemoteFileProvider();
-            vscode.window.registerTreeDataProvider('remoteFilesView', remoteFileProvider);
-            this.selectedConnection = undefined;
-        }
-    }
-
-    // Connection and disconnection functions
-    connect(treeItem: SSHConnectionTreeItem) {
-        const connection = treeItem.connection;
-        if (!connection.client) {
-            connection.client = new Client();
-        }
-
-        checkAndUpdateKnownHosts(connection).then(() => {
-            if (connection.usePrivateKey) {
-                const privateKeyPath = connection.privateKeyPath ?? path.join(SSH_CONFIG_DIR, `${connection.username}_${connection.host}_key`);
-                if (fileUtils.fileExists(privateKeyPath)) {
-                    connection.privateKeyPath = privateKeyPath;
-                    this.connectWithSSHKey(connection, treeItem);
-                } else {
-                    vscode.window.showErrorMessage(`Private key file not found: ${privateKeyPath}`);
-                }
-            } else {
-                vscode.window.showInputBox({ placeHolder: 'Password', password: true }).then(password => {
-                    if (password) {
-                        connection.password = password;
-                        this.connectWithPassword(connection, treeItem, password);
-                    } else {
-                        vscode.window.showErrorMessage('Connection cancelled. No password provided.');
-                    }
-                });
-            }
-        }).catch(error => {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            vscode.window.showErrorMessage(`Error during known hosts verification: ${errorMessage}`);
-        });
-    }
-
-    disconnect(treeItem: SSHConnectionTreeItem) {
-        const connection = treeItem.connection;
-        if (connection.client) {
-            connection.client.end();
-            vscode.window.showInformationMessage(`Disconnected from ${connection.host}`);
-            connection.client = undefined;
-            treeItem.connected = false;
-            treeItem.updateContextValue();
-            this._onDidChangeTreeData.fire(treeItem);
-
-            const terminalName = `${connection.username}@${connection.host}`;
+    
+            // Dispose of the terminal associated with the connection
+            const terminalName = `${connection.user}@${connection.host}`;
             vscode.window.terminals.forEach(terminal => {
                 if (terminal.name === terminalName) {
                     terminal.dispose();
                 }
             });
-
-            // Cleanup the remote file provider
-            const remoteFileProvider = this.remoteFileProviders.get(connection.id);
-            if (remoteFileProvider) {
-                remoteFileProvider.cleanup();
-                this.remoteFileProviders.delete(connection.id);
-            }
-
-            // Close the remote file view associated with the disconnected connection
-            const emptyProvider = new EmptyRemoteFileProvider();
-            vscode.window.registerTreeDataProvider('remoteFilesView', emptyProvider);
-
-            if (this.selectedConnection && this.selectedConnection.id === connection.id) {
-                this.selectedConnection = undefined;
+    
+            // If the removed connection was the selected connection, reset the context and remote file view
+            if (this.selectedConnection && this.selectedConnection.host === connection.host && this.selectedConnection.user === connection.user) {
                 vscode.commands.executeCommand('setContext', 'sshConnectionActive', false);
+                const remoteFileProvider = new EmptyRemoteFileProvider();
+                vscode.window.registerTreeDataProvider('remoteFilesView', remoteFileProvider);
+                this.selectedConnection = undefined;
             }
-
-            // Update the tree item context to reflect the disconnected state
-            treeItem.updateContextValue();
-            this._onDidChangeTreeData.fire(treeItem);
-        } else {
-            vscode.window.showInformationMessage(`Not connected to ${connection.host}`);
+    
+            vscode.window.showInformationMessage(`Connection for host "${connection.host}" has been removed.`);
+        } catch (error) {
+            console.error('Error removing connection:', error);
+            vscode.window.showErrorMessage(`Failed to remove connection for host "${connection.host}".`);
         }
     }
 
+    public async moveConnectionToFolder(treeItem: SSHConnectionTreeItem): Promise<void> {
+        const connection = treeItem.connection;
+    
+        const folderName = await vscode.window.showInputBox({
+            placeHolder: 'Enter the name of the virtual folder (e.g., Folder1/SubFolder1)',
+            prompt: 'Move this connection to a virtual folder (leave empty to remove from folders)',
+        });
+    
+        if (folderName !== undefined) {
+            // Preserve the current connection state
+            const activeClient = connection.client;
+            const activePassword = connection.password;
+            const activePrivateKey = connection.privateKey;
+            const activePassphrase = connection.passphrase;
+    
+            // Preserve the current RemoteFileProvider
+            const remoteFileProvider = this.remoteFileProviders.get(connection.id);
+    
+            // Update the vFolderTag
+            connection.vFolderTag = folderName.trim() || undefined;
+    
+            // Update the SSH config file
+            insertOrUpdateConnection(connection);
+    
+            // Refresh the view without resetting the RemoteFileProvider
+            this.loadSSHConnections();
+    
+            // Restore the connection state
+            const updatedConnection = this.connections.find(
+                (conn) => conn.host === connection.host && conn.user === connection.user
+            );
+            if (updatedConnection) {
+                updatedConnection.client = activeClient;
+                updatedConnection.password = activePassword;
+                updatedConnection.privateKey = activePrivateKey;
+                updatedConnection.passphrase = activePassphrase;
+    
+                // Reassociate the RemoteFileProvider with the updated connection
+                if (remoteFileProvider) {
+                    this.remoteFileProviders.set(updatedConnection.id, remoteFileProvider);
+                    remoteFileProvider.updateConnection(updatedConnection, '/');
+                    vscode.window.registerTreeDataProvider('remoteFilesView', remoteFileProvider);
+                    remoteFileProvider.refresh();
+                }
+            }
+    
+            vscode.window.showInformationMessage(`Connection moved to folder: ${folderName || 'Root'}`);
+        }
+    }
+
+    // Method to connect to an SSH connection
+    connect(treeItem: SSHConnectionTreeItem) {
+        const connection = treeItem.connection;
+    
+        if (!connection.client) {
+            connection.client = new Client();
+        }
+    
+        checkKnownHosts(connection).then(async (isHostInKnownHosts) => {
+            if (!isHostInKnownHosts) {
+                // Host is not in known_hosts, try to connect and then add the host key                
+                try {
+                    await this.tryConnect(connection, treeItem);
+                    const newHostKey = getHostKeyFromKeyscan(connection.host);
+                    addKnownHost(connection.host, newHostKey);
+                    vscode.window.showInformationMessage(`Host "${connection.host}" added to known_hosts.`);
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Failed to add host "${connection.host}" to known_hosts: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    this.removeConnectionFromList(connection);
+                }
+            } else {
+                // Host is in known_hosts, check if the host key has changed
+                try {
+                    await updateKnownHosts(connection);
+                    await this.tryConnect(connection, treeItem);
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Error during known hosts verification: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    this.removeConnectionFromList(connection);
+                }
+            }
+        }).catch(error => {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            vscode.window.showErrorMessage(`Error during known hosts verification: ${errorMessage}`);
+            this.removeConnectionFromList(connection);
+        });
+    }
+
+    // Helper function to try connecting to the SSH host
+    private async tryConnect(connection: ExtendedSSHConnection, treeItem: SSHConnectionTreeItem) {
+        if (!connection.user) {
+            const username = await vscode.window.showInputBox({ placeHolder: 'Enter Username' });
+            if (username) {
+                connection.user = username;
+            } else {
+                vscode.window.showErrorMessage('Username is required to establish the connection.');
+                this.removeConnectionFromList(connection);
+                return;
+            }
+        }
+    
+        if (connection.usePrivateKey) {
+            try {
+                const identityFile = getIdentityFile(connection.host);
+                connection.identityFile = identityFile;
+                await this.connectWithSSHKey(connection, treeItem);
+            } catch (error) {
+                vscode.window.showErrorMessage(error instanceof Error ? error.message : 'Unknown error occurred while retrieving the identity file.');
+                this.removeConnectionFromList(connection);
+            }
+        } else {
+            const password = await vscode.window.showInputBox({ placeHolder: 'Password', password: true });
+            if (password) {
+                connection.password = password;
+                await this.connectWithPassword(connection, treeItem, password);
+            } else {
+                vscode.window.showErrorMessage('Connection cancelled. No password provided.');
+                this.removeConnectionFromList(connection);
+            }
+        }
+    }
+
+    // Method to disconnect from an SSH connection
+    public disconnect(treeItem: SSHConnectionTreeItem) {
+        const connection = treeItem.connection;
+    
+        if (connection.client) {
+            // End the SSH client connection
+            connection.client.end();
+            connection.client = undefined;
+        }
+    
+        // Remove the terminal associated with the connection
+        const terminal = this.terminals.get(connection.id);
+        if (terminal) {
+            terminal.dispose();
+            this.terminals.delete(connection.id);
+        }
+    
+        // Cleanup the RemoteFileProvider for the connection
+        const remoteFileProvider = RemoteFileProvider.getProviderByConnectionId(connection.id);
+        if (remoteFileProvider) {
+            remoteFileProvider.cleanup();
+        }
+    
+        // If the disconnected connection was the selected connection, reset the remote file view
+        if (this.selectedConnection && this.selectedConnection.id === connection.id) {
+            const emptyProvider = new EmptyRemoteFileProvider();
+            vscode.window.registerTreeDataProvider('remoteFilesView', emptyProvider);
+            this.selectedConnection = undefined;
+            vscode.commands.executeCommand('setContext', 'sshConnectionActive', false);
+        }
+    
+        this.removeConnectionFromList(connection);
+    
+        vscode.window.showInformationMessage(`Connection to ${connection.host} has been removed.`);
+    }
+
+    // Method to remove a connection from the list
+    private removeConnectionFromList(connection: ExtendedSSHConnection): void {
+        // Remove the connection from the connections array
+        this.connections = this.connections.filter(conn => conn.id !== connection.id);
+    
+        // Notify the TreeDataProvider to refresh the view
+        this._onDidChangeTreeData.fire();
+        this.loadSSHConnections();
+    }
+
     // Method to handle connection ready event
-    private async handleConnectionReady(connection: SSHConnection, treeItem: SSHConnectionTreeItem, terminalArgs: string) {
+    private async handleConnectionReady(connection: ExtendedSSHConnection, treeItem: SSHConnectionTreeItem, terminalArgs: string) {
         connection.client!.on('ready', async () => {
             console.log("Connection ready");
             vscode.window.showInformationMessage(`Connected to ${connection.host}`);
@@ -462,7 +575,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
             this._onDidChangeTreeData.fire(treeItem);
     
             // Use the existing SSH connection to open the terminal
-            const terminalName = `${connection.username}@${connection.host}`;
+            const terminalName = `${connection.user}@${connection.host}`;
             const terminal = vscode.window.createTerminal({
                 name: terminalName,
                 shellPath: '/bin/sh',
@@ -477,74 +590,115 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
 
     // Method to handle terminal selection change
     public handleTerminalSelectionChange(terminal: vscode.Terminal) {
-        const connection = this.connections.find(conn => `${conn.username}@${conn.host}` === terminal.name);
+        console.log('Terminal selected:', terminal.name);
+    
+        const connection = this.connections.find(conn => {
+            console.log('Checking connection:', conn);
+            if (!conn.user || !conn.host) {
+                console.warn('Connection has undefined user or host:', conn);
+                return false;
+            }
+            return `${conn.user}@${conn.host}` === terminal.name;
+        });
+    
         if (connection) {
+            console.log('Connection found:', connection);
+    
+            // Validate connection properties before creating the tree item
+            const label = connection.user ? `${connection.user}@${connection.host}` : connection.host;
+            if (!label) {
+                console.error('Invalid connection label:', connection);
+                vscode.window.showErrorMessage('Failed to select connection: Invalid connection label.');
+                return;
+            }
+    
             const treeItem = new SSHConnectionTreeItem(connection, !!connection.client);
             this.selectConnection(treeItem);
-            this._onDidChangeTreeData.fire(treeItem);
+    
+            try {
+                this._onDidChangeTreeData.fire(treeItem);
+            } catch (error) {
+                console.error('Error updating tree view:', error);
+                vscode.window.showErrorMessage('Failed to update tree view.');
+            }
+        } else {
+            console.warn('No matching connection found for terminal:', terminal.name);
         }
     }
 
     // Method to handle terminal close event
     public handleTerminalClose(terminal: vscode.Terminal) {
-        const connectionIndex = this.connections.findIndex(conn => `${conn.username}@${conn.host}` === terminal.name);
-        if (connectionIndex !== -1) {
-            const connection = this.connections[connectionIndex];
-            const treeItem = new SSHConnectionTreeItem(connection, false);
-            this.disconnect(treeItem);
-            this._onDidChangeTreeData.fire(); // Refresh the view
+        const connectionId = Array.from(this.terminals.entries()).find(([_, term]) => term === terminal)?.[0];
+    
+        if (connectionId) {
+            const connection = this.connections.find(conn => conn.id === connectionId);
+    
+            if (connection) {
+                // Create a tree item for the connection
+                const treeItem = new SSHConnectionTreeItem(connection, !!connection.client);
+    
+                // Reuse the disconnect() function
+                this.disconnect(treeItem);
+    
+                vscode.window.showInformationMessage(`Terminal for connection ${connection.host} has been closed.`);
+            }
         }
     }
 
     // Method to handle remote file view selection change
     public handleRemoteFileSelectionChange(resourceUri: vscode.Uri) {
-        const connection = this.connections.find(conn => resourceUri.authority === `${conn.username}@${conn.host}:${conn.port}`);
+        const connection = this.connections.find(conn => resourceUri.authority === `${conn.user}@${conn.hostname}:${conn.port}`);
         if (connection) {
+            this.loadSSHConnections();
             const treeItem = new SSHConnectionTreeItem(connection, !!connection.client);
             this.selectConnection(treeItem);
             this._onDidChangeTreeData.fire(treeItem);
         }
     }
 
-    private async connectWithPassword(connection: SSHConnection, treeItem: SSHConnectionTreeItem, password: string) {
+    private async connectWithPassword(connection: ExtendedSSHConnection, treeItem: SSHConnectionTreeItem, password: string) {
         try {
             const installed = await this.isSSHPassInstalled();
             if (!installed) {
                 vscode.window.showErrorMessage(`'sshpass' is not installed locally. Please install it to proceed.`);
+                this.removeConnectionFromList(connection);
                 return;
             }
     
             connection.client!.on('error', (err) => {
                 vscode.window.showErrorMessage(`Failed to connect: ${err.message}`);
                 console.error(`Failed to connect: ${err.message}`);
+                this.removeConnectionFromList(connection);
             });
     
-            await this.handleConnectionReady(connection, treeItem, `sshpass -p ${password} ssh ${connection.username}@${connection.host} -p ${connection.port}`);
+            await this.handleConnectionReady(connection, treeItem, `sshpass -p ${password} ssh -o StrictHostKeyChecking=no ${connection.user}@${connection.hostname} -p ${connection.port}`);
     
             connection.client!.connect({
-                host: connection.host,
-                username: connection.username,
+                host: connection.hostname,
+                username: connection.user,
                 password: password,
-                port: parseInt(connection.port ?? SSH_DEFAULT_PORT.toString())
+                port: connection.port ?? SSH_DEFAULT_PORT,
             });
         } catch (error: any) {
             vscode.window.showErrorMessage(`Error connecting with password: ${error.message}`);
+            this.removeConnectionFromList(connection);
         }
     }
 
-    private async connectWithSSHKey(connection: SSHConnection, treeItem: SSHConnectionTreeItem) {
+    private async connectWithSSHKey(connection: ExtendedSSHConnection, treeItem: SSHConnectionTreeItem) {
         try {
             const installed = await this.isSSHPassInstalled();
             if (!installed) {
                 vscode.window.showErrorMessage(`'sshpass' is not installed locally. Please install it to proceed.`);
+                this.removeConnectionFromList(connection);
                 return;
             }
     
-            const privateKeyPath = connection.privateKeyPath!;
+            const identityFile = connection.identityFile!;
             let passphrase: string | undefined = connection.passphrase;
     
             try {
-                const privateKey = fileUtils.readFile(privateKeyPath);
+                const privateKey = fileUtils.readFile(identityFile);
                 const parsedKey = utils.parseKey(Buffer.from(privateKey));
     
                 if (parsedKey instanceof Error && parsedKey.message.toLowerCase().includes('encrypted')) {
@@ -552,6 +706,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
                     passphrase = await vscode.window.showInputBox({ placeHolder: 'Passphrase for private key', password: true });
                     if (!passphrase) {
                         vscode.window.showErrorMessage('Passphrase not provided. Connection cancelled.');
+                        this.removeConnectionFromList(connection);
                         return;
                     }
                 }
@@ -561,6 +716,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
                 } else {
                     vscode.window.showErrorMessage('Failed to read private key due to an unknown error.');
                 }
+                this.removeConnectionFromList(connection);
                 return;
             }
     
@@ -574,15 +730,16 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
             connection.client.on('error', (err) => {
                 vscode.window.showErrorMessage(`Failed to connect: ${err.message}`);
                 console.error(`Failed to connect: ${err.message}`);
+                this.removeConnectionFromList(connection);
             });
     
-            await this.handleConnectionReady(connection, treeItem, `sshpass -P "Enter passphrase for key '${privateKeyPath}':" -p ${passphrase} ssh -i ${privateKeyPath} ${connection.username}@${connection.host} -p ${connection.port}`);
+            await this.handleConnectionReady(connection, treeItem, `sshpass -P "Enter passphrase for key '${identityFile}':" -p ${passphrase} ssh -i ${identityFile} ${connection.user}@${connection.hostname} -p ${connection.port}`);
     
             connection.client.connect({
                 host: connection.host,
-                port: parseInt(connection.port ?? SSH_DEFAULT_PORT.toString()),
-                username: connection.username,
-                privateKey: Buffer.from(fileUtils.readFile(privateKeyPath)),
+                port: connection.port ?? SSH_DEFAULT_PORT,
+                username: connection.user,
+                privateKey: Buffer.from(fileUtils.readFile(identityFile)),
                 passphrase: passphrase // Use the passphrase if provided
             });
     
@@ -605,23 +762,23 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
         });
     }
 
-    private async loadRemoteFiles(connection: SSHConnection, remotePath: string) {
+    private async loadRemoteFiles(connection: ExtendedSSHConnection, remotePath: string) {
         if (!connection.client) {
             vscode.window.showErrorMessage('SSH connection is not established.');
             return;
         }
-
-        let remoteFileProvider = this.remoteFileProviders.get(connection.id);
+    
+        // Retrieve or create a RemoteFileProvider for the connection
+        let remoteFileProvider = RemoteFileProvider.getProviderByConnectionId(connection.id);
         if (!remoteFileProvider) {
             remoteFileProvider = new RemoteFileProvider(connection, remotePath);
-            const remoteFileViewTitle = new RemoteFileViewTitle(`Connection: ${connection.username}@${connection.host}`);
+            const remoteFileViewTitle = new RemoteFileViewTitle(`Connection: ${connection.user}@${connection.host}`);
             remoteFileProvider.setTitleItem(remoteFileViewTitle);
             vscode.window.registerTreeDataProvider('remoteFilesView', remoteFileProvider);
-            this.remoteFileProviders.set(connection.id, remoteFileProvider);
         } else {
             remoteFileProvider.updateConnection(connection, remotePath);
         }
-
+    
         remoteFileProvider.refresh();
         vscode.commands.executeCommand('setContext', 'sshConnectionActive', true);
     }
@@ -636,16 +793,31 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
 }
 
 export class SSHConnectionTreeItem extends vscode.TreeItem {
-    constructor(public readonly connection: SSHConnection, public connected: boolean) {
-        super(`${connection.username}@${connection.host}`, vscode.TreeItemCollapsibleState.None);
-        this.tooltip = `${this.connection.username}@${this.connection.host}`;
-        this.description = this.connection.host;
+    constructor(public readonly connection: ExtendedSSHConnection, public connected: boolean) {
+        const label = connection.user ? `${connection.user}@${connection.host}` : connection.host || 'Unknown Host';
+        super(label, vscode.TreeItemCollapsibleState.None);
+
+        this.tooltip = connection.user
+            ? `${connection.user}@${connection.host}`
+            : connection.host || 'Unknown Host';
+        this.description = connection.user
+            ? `${connection.user}@${connection.host}`
+            : connection.host || 'Unknown Host';
         this.contextValue = 'sshConnection';
-    
+
         this.updateContextValue();
     }
 
     updateContextValue() {
         this.contextValue = this.connected ? 'sshConnectionConnected' : 'sshConnectionDisconnected';
+    }
+}
+
+export class SSHFolderTreeItem extends vscode.TreeItem {
+    constructor(public readonly folderName: string) {
+        super(folderName.split('/').pop()!, vscode.TreeItemCollapsibleState.Collapsed);
+        this.tooltip = `Folder: ${folderName}`;
+        this.description = folderName;
+        this.contextValue = 'sshFolder';
     }
 }
