@@ -366,7 +366,7 @@ export const createIdentityFile = (host: string): string => {
 
 /**
  * Retrieves the identity file for the given host.
- * @param host The hostname or IP address of the server.
+ * @param host The host name for the connection.
  * @returns The path to the identity file.
  * @throws An error if the identity file does not exist.
  */

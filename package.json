@@ -13,7 +13,7 @@
     "type": "git",
     "url": "https://github.com/STeXE89/ssh-multi-connect.git"
   },
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "STeXE89",
   "engines": {
     "vscode": "^1.96.0"
