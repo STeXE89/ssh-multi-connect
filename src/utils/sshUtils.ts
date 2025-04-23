@@ -4,9 +4,9 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { readFile, writeFile, fileExists, ensureDirectoryExists, ensureFileExists } from './fileUtils';
 
-const SSH_CONFIG_DIR = path.join(os.homedir(), '.ssh');
-const SSH_CONFIG_PATH = path.join(SSH_CONFIG_DIR, 'config');
-const SSH_KNOWN_HOSTS_PATH = path.join(SSH_CONFIG_DIR, 'known_hosts');
+export const SSH_CONFIG_DIR = path.join(os.homedir(), '.ssh');
+export const SSH_CONFIG_PATH = path.join(SSH_CONFIG_DIR, 'config');
+export const SSH_KNOWN_HOSTS_PATH = path.join(SSH_CONFIG_DIR, 'known_hosts');
 
 export interface SSHConnection {
     host: string;
