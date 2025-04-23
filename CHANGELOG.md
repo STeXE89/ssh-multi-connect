@@ -2,6 +2,15 @@
 
 All notable changes to the "ssh-multi-connect" extension will be documented in this file.
 
+## [0.0.6] - 2025/04/23
+
+### Fixed
+- Fixed passing hostname instead of host (saved connection name) related to known_hosts.
+- Security issue fixed: prevented password from being displayed in terminal tooltip command line.
+
+## Changed
+- General code optimization/cleanup.
+
 ## [0.0.5] - 2025/04/17
 
 ### Added
