@@ -19,7 +19,6 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
     private titleItem?: RemoteFileViewTitle;
     private sftp?: any;
-    private tempFiles: Map<string, Set<string>> = new Map();
     private tempFileMap: Map<string, string> = new Map();
     private fileLists: Map<string, RemoteFileTreeItem[]> = new Map();
 
@@ -157,7 +156,11 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
             await sftpUtils.createRemoteFile(this.sftp, remotePath);
             vscode.window.showInformationMessage(`File created: ${remotePath}`);
             this.refresh();
-            await this.openRemoteFile(this.createResourceUri(node.resourceUri.path, fileName));
+    
+            // Register the temporary file before opening it
+            const resourceUri = this.createResourceUri(node.resourceUri.path, fileName);
+            this.tempFileMap.set(resourceUri.fsPath, remotePath);
+            await this.openRemoteFile(resourceUri);
         } catch (error: any) {
             vscode.window.showErrorMessage(`Error creating file: ${error.message}`);
         }
@@ -192,19 +195,18 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
     private async onDidCloseTextDocument(document: vscode.TextDocument) {
         const filePath = document.uri.fsPath;
-        for (const [connection, files] of this.tempFiles.entries()) {
-            if (files.has(filePath)) {
-                try {
-                    await fileUtils.deleteFile(filePath);
-                    files.delete(filePath);
-                    this.tempFileMap.delete(filePath);
-                    if (files.size === 0) {
-                        this.tempFiles.delete(connection);
-                    }
-                } catch (err) {
-                    console.error(`Failed to delete temporary file: ${filePath}`, err);
-                }
-                break;
+    
+        // Check if the file is a temporary file
+        const remotePath = this.tempFileMap.get(filePath);
+        if (remotePath) {
+            try {
+                // Delete the local temporary file
+                await fileUtils.deleteFile(filePath);
+    
+                // Remove the file from tempFileMap
+                this.tempFileMap.delete(filePath);
+            } catch (err) {
+                console.error(`Failed to delete temporary file: ${filePath}`, err);
             }
         }
     }
@@ -212,42 +214,39 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
     private async onDidSaveTextDocument(document: vscode.TextDocument) {
         const filePath = document.uri.fsPath;
         const remotePath = this.tempFileMap.get(filePath);
-        if (remotePath) {
-            console.log(`Saving document. Local path: ${filePath}, Remote path: ${remotePath}`);
-            await vscode.window.withProgress({
+    
+        if (!remotePath) {
+            console.warn(`No remote path found for the saved document: ${filePath}`);
+            return;
+        }
+    
+        console.log(`Saving document. Local path: ${filePath}, Remote path: ${remotePath}`);
+        await vscode.window.withProgress(
+            {
                 location: vscode.ProgressLocation.Notification,
                 title: "Uploading file to remote server...",
-                cancellable: false
-            }, async (progress) => {
+                cancellable: false,
+            },
+            async (progress) => {
                 await sftpUtils.uploadRemoteFile(this.sftp, filePath, remotePath);
                 progress.report({ increment: 100 });
-            });
-            try {
-                await fileUtils.deleteFile(filePath);
-                for (const files of this.tempFiles.values()) {
-                    files.delete(filePath);
-                }
-                this.tempFileMap.delete(filePath);
-            } catch (err) {
-                console.error(`Failed to delete temporary file: ${filePath}`, err);
             }
-        } else {
-            vscode.window.showErrorMessage('Remote path not found for the saved document.');
+        );
+    
+        try {
+            await fileUtils.deleteFile(filePath);
+            this.tempFileMap.delete(filePath);
+        } catch (err) {
+            console.error(`Failed to delete temporary file: ${filePath}`, err);
         }
     }
 
     private onDidChangeVisibleTextEditors(editors: readonly vscode.TextEditor[]) {
         const openFiles = new Set(editors.map(editor => editor.document.uri.fsPath));
-        for (const [connection, files] of this.tempFiles.entries()) {
-            files.forEach(filePath => {
-                if (openFiles.has(filePath)) {
-                    const document = vscode.workspace.textDocuments.find(doc => doc.uri.fsPath === filePath);
-                    if (document) {
-                        vscode.commands.executeCommand('setContext', 'sshConnectionActive', true);
-                        vscode.window.registerTreeDataProvider('remoteFilesView', this);
-                    }
-                }
-            });
+        for (const filePath of this.tempFileMap.keys()) {
+            if (!openFiles.has(filePath)) {
+                // Handle files that are no longer open, if needed
+            }
         }
     }
 
@@ -273,6 +272,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
     private async openRemoteFileInEditor(resourceUri: vscode.Uri) {
         const localFileName = `${this.connection.host}_${path.basename(resourceUri.fsPath)}`;
         const localPath = path.join(os.tmpdir(), localFileName);
+    
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: "Downloading file from remote server...",
@@ -281,11 +281,10 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
             await sftpUtils.downloadRemoteFile(this.sftp, resourceUri.path, localPath);
             progress.report({ increment: 100 });
         });
-        if (!this.tempFiles.has(this.connection.host)) {
-            this.tempFiles.set(this.connection.host, new Set());
-        }
-        this.tempFiles.get(this.connection.host)!.add(localPath);
+    
+        // Register the temporary file and its remote path
         this.tempFileMap.set(localPath, resourceUri.path);
+    
         const localUri = vscode.Uri.file(localPath);
         const document = await vscode.workspace.openTextDocument(localUri);
         await vscode.window.showTextDocument(document);
@@ -294,26 +293,25 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
     public cleanup(): void {
         // Perform cleanup and remove this provider from the static map
         RemoteFileProvider.removeProviderByConnectionId(this.connection.id);
-
+    
         for (const document of vscode.workspace.textDocuments) {
             const filePath = document.uri.fsPath;
-            if (this.tempFiles.has(filePath)) {
+            if (this.tempFileMap.has(filePath)) {
                 vscode.window.showTextDocument(document).then(() => {
                     vscode.commands.executeCommand('workbench.action.closeActiveEditor');
                 });
             }
         }
-
-        for (const files of this.tempFiles.values()) {
-            for (const filePath of files) {
-                try {
-                    fileUtils.deleteFile(filePath);
-                } catch (err) {
-                    console.error(`Failed to delete temporary file: ${filePath}`, err);
-                }
+    
+        for (const filePath of this.tempFileMap.keys()) {
+            try {
+                fileUtils.deleteFile(filePath);
+            } catch (err) {
+                console.error(`Failed to delete temporary file: ${filePath}`, err);
             }
         }
-        this.tempFiles.clear();
+    
+        this.tempFileMap.clear();
     }
 }
 
