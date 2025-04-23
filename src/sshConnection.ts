@@ -565,7 +565,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
     }
 
     // Method to handle connection ready event
-    private async handleConnectionReady(connection: ExtendedSSHConnection, treeItem: SSHConnectionTreeItem, terminalArgs: string) {
+    private async handleConnectionReady(connection: ExtendedSSHConnection, treeItem: SSHConnectionTreeItem, terminalArgs: string, terminalEnv?: { [key: string]: string }) {
         connection.client!.on('ready', async () => {
             console.log("Connection ready");
             vscode.window.showInformationMessage(`Connected to ${connection.host}`);
@@ -579,7 +579,8 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
             const terminal = vscode.window.createTerminal({
                 name: terminalName,
                 shellPath: '/bin/sh',
-                shellArgs: ['-c', terminalArgs]
+                shellArgs: ['-c', terminalArgs],
+                env: terminalEnv, // Pass the environment variable
             });
     
             this.registerTerminal(connection, terminal);
@@ -671,7 +672,11 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
                 this.removeConnectionFromList(connection);
             });
     
-            await this.handleConnectionReady(connection, treeItem, `sshpass -p ${password} ssh -o StrictHostKeyChecking=no ${connection.user}@${connection.hostname} -p ${connection.port}`);
+            // Set the password in an environment variable
+            const terminalArgs = `sshpass -e ssh -o StrictHostKeyChecking=no ${connection.user}@${connection.hostname} -p ${connection.port}`;
+            const terminalEnv = { SSHPASS: password };
+    
+            await this.handleConnectionReady(connection, treeItem, terminalArgs, terminalEnv);
     
             connection.client!.connect({
                 host: connection.hostname,
