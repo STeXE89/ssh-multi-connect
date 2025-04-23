@@ -8,7 +8,6 @@ This extension 'ssh-multi-connect' allows you to manage multiple SSH connections
 - Connect and disconnect from SSH servers.
 - Browse and manage remote files.
 - Open remote files in the editor and save changes back to the server.
-- Open remote files in the editor and save changes back to the server.
 - Organize SSH connections into groups for easy access.
 
 ## Requirements
@@ -30,6 +29,15 @@ This extension contributes the following settings:
 ## Release Notes
 
 Below some last release note, for more details see the CHANGELOG.md
+
+## [0.0.6] - 2025/04/23
+
+### Fixed
+- Fixed passing hostname instead of host (saved connection name) related to known_hosts.
+- Security issue fixed: prevented password from being displayed in terminal tooltip command line.
+
+## Changed
+- General code optimization/cleanup.
 
 ## [0.0.5] - 2025/04/17
 
