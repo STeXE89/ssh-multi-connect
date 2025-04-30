@@ -2,6 +2,11 @@
 
 All notable changes to the "ssh-multi-connect" extension will be documented in this file.
 
+## [0.0.8] - 2025/04/30
+
+### Fixed
+- Fixed file path for multi command panel
+
 ## [0.0.7] - 2025/04/30
 
 ### Added

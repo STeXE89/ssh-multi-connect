@@ -33,6 +33,6 @@ function getFilePath(relativePath: string): string {
 }
 
 // Paths to webview resources
-export const MULTICOMMANDPANEL_HTML_PATH = () => getFilePath('src/media/webviews/multiCommandPanel.html');
-export const MULTICOMMANDPANEL_CSS_PATH = () => getFilePath('src/media/webviews/multiCommandPanel.css');
-export const MULTICOMMANDPANEL_JS_PATH = () => getFilePath('src/media/webviews/multiCommandPanel.js');
+export const MULTICOMMANDPANEL_HTML_PATH = () => getFilePath('resources/media/webviews/multiCommandPanel.html');
+export const MULTICOMMANDPANEL_CSS_PATH = () => getFilePath('resources/media/webviews/multiCommandPanel.css');
+export const MULTICOMMANDPANEL_JS_PATH = () => getFilePath('resources/media/webviews/multiCommandPanel.js');
