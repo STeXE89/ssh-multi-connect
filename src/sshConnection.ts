@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { ProviderResult } from 'vscode';
-import * as fileUtils from './utils/fileUtils';
 import { Client, utils } from 'ssh2';
+import { MULTICOMMANDPANEL_HTML_PATH, MULTICOMMANDPANEL_CSS_PATH, MULTICOMMANDPANEL_JS_PATH} from './constants/globals';
+import * as fileUtils from './utils/fileUtils';
 import { RemoteFileProvider, RemoteFileViewTitle, EmptyRemoteFileProvider } from './remoteFile';
 import { SSH_DEFAULT_PORT, SSHConnection, insertOrUpdateConnection, getAllConnections, removeConnection, createIdentityFile, getIdentityFile, addKnownHost, removeKnownHost, isKnownHost, getHostKeyFromKeyscan } from './utils/sshUtils';
 
@@ -115,6 +116,12 @@ export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
 
         sshViewProvider.connections = uniqueConnections;
         sshViewProvider.refresh();
+        
+        // Update the MultiCommandPanel with the new connections
+        if (sshViewProvider.multiCommandPanel) {
+            const connectedConnections = sshViewProvider.connections.filter(conn => conn.client);
+            sshViewProvider.multiCommandPanel.updateConnections(connectedConnections);
+        }
 
     } catch (error: any) {
         vscode.window.showErrorMessage(`Error adding SSH connection: ${error.message}`);
@@ -168,26 +175,28 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
     private _onDidChangeTreeData: vscode.EventEmitter<SSHConnectionTreeItem | undefined | void> = new vscode.EventEmitter<SSHConnectionTreeItem | undefined | void>();
     readonly onDidChangeTreeData: vscode.Event<SSHConnectionTreeItem | undefined | void> = this._onDidChangeTreeData.event;
 
+    private sshTreeView: vscode.TreeView<SSHConnectionTreeItem | SSHFolderTreeItem>; // Store the TreeView instance
     public connections: ExtendedSSHConnection[] = [];
     private selectedConnection?: ExtendedSSHConnection;
     private terminals: Map<string, vscode.Terminal> = new Map();
     private remoteFileProviders: Map<string, RemoteFileProvider> = new Map();
+    public multiCommandPanel?: MultiCommandPanel;
 
     constructor(private context: vscode.ExtensionContext) {
         this.loadSSHConnections();
 
-        const sshTreeView = vscode.window.createTreeView('sshConnectionsView', {
+        this.sshTreeView = vscode.window.createTreeView('sshConnectionsView', {
             treeDataProvider: this,
-            showCollapseAll: true
+            showCollapseAll: true,
         });
 
-        sshTreeView.onDidChangeSelection(event => {
+        this.sshTreeView.onDidChangeSelection(event => {
             if (event.selection.length > 0 && event.selection[0] instanceof SSHConnectionTreeItem) {
                 this.selectConnection(event.selection[0]);
             }
         });
 
-        context.subscriptions.push(sshTreeView);
+        context.subscriptions.push(this.sshTreeView);
 
         vscode.window.onDidCloseTerminal(this.handleTerminalClose.bind(this));
     }
@@ -295,7 +304,12 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
                     return 0;
                 });
     
-            this._onDidChangeTreeData.fire();
+            if (this.multiCommandPanel) {
+                const connectedConnections = this.connections.filter(conn => conn.client);
+                this.multiCommandPanel.updateConnections(connectedConnections);
+            }
+
+            this._onDidChangeTreeData.fire();  
         } catch (error) {
             console.error('Error loading SSH connections:', error);
             vscode.window.showErrorMessage('Failed to load SSH connections.');
@@ -348,7 +362,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
         this.terminals.set(connection.id, terminal);
     }
 
-    removeConnection(treeItem: SSHConnectionTreeItem) {
+    public removeConnection(treeItem: SSHConnectionTreeItem) {
         const connection = treeItem.connection;
     
         if (!connection.host || !connection.user) {
@@ -356,25 +370,13 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
             return;
         }
     
-        console.log('Removing connection for host:', connection.host, 'and user:', connection.user);
-    
         try {
-            // Use the utility function to remove the connection from the SSH config file
             removeConnection(connection.host);
     
-            // Remove the connection from the in-memory list
             this.connections = this.connections.filter(conn => !(conn.host === connection.host && conn.user === connection.user));
     
-            // Refresh the tree view
-            try {
-                console.log('Firing tree data change event for:', treeItem);
-                this._onDidChangeTreeData.fire(treeItem);
-            } catch (error) {
-                console.error('Error firing tree data change event:', error);
-                vscode.window.showErrorMessage('Failed to refresh the tree view.');
-            }
+            this._onDidChangeTreeData.fire(treeItem);
     
-            // Dispose of the terminal associated with the connection
             const terminalName = `${connection.user}@${connection.host}`;
             vscode.window.terminals.forEach(terminal => {
                 if (terminal.name === terminalName) {
@@ -382,7 +384,6 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
                 }
             });
     
-            // If the removed connection was the selected connection, reset the context and remote file view
             if (this.selectedConnection && this.selectedConnection.host === connection.host && this.selectedConnection.user === connection.user) {
                 vscode.commands.executeCommand('setContext', 'sshConnectionActive', false);
                 const remoteFileProvider = new EmptyRemoteFileProvider();
@@ -392,7 +393,6 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
     
             vscode.window.showInformationMessage(`Connection for host "${connection.host}" has been removed.`);
         } catch (error) {
-            console.error('Error removing connection:', error);
             vscode.window.showErrorMessage(`Failed to remove connection for host "${connection.host}".`);
         }
     }
@@ -448,7 +448,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
     }
 
     // Method to connect to an SSH connection
-    connect(treeItem: SSHConnectionTreeItem) {
+    public connect(treeItem: SSHConnectionTreeItem) {
         const connection = treeItem.connection;
     
         if (!connection.client) {
@@ -476,6 +476,11 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
                     vscode.window.showErrorMessage(`Error during known hosts verification: ${error instanceof Error ? error.message : 'Unknown error'}`);
                     this.removeConnectionFromList(connection);
                 }
+            }
+    
+            if (this.multiCommandPanel) {
+                const connectedConnections = this.connections.filter(conn => conn.client);
+                this.multiCommandPanel.updateConnections(connectedConnections);
             }
         }).catch(error => {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -541,19 +546,25 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
             remoteFileProvider.cleanup();
         }
     
-        // If the disconnected connection was the selected connection, reset the remote file view
         if (this.selectedConnection && this.selectedConnection.id === connection.id) {
-            const emptyProvider = new EmptyRemoteFileProvider();
-            vscode.window.registerTreeDataProvider('remoteFilesView', emptyProvider);
-            this.selectedConnection = undefined;
-            vscode.commands.executeCommand('setContext', 'sshConnectionActive', false);
+            this.selectedConnection = this.connections.find(conn => conn.client);
+    
+            if (this.selectedConnection) {
+                const newRemoteFileProvider = RemoteFileProvider.createOrGetProvider(this.selectedConnection, '/');
+                vscode.window.registerTreeDataProvider('remoteFilesView', newRemoteFileProvider);
+                newRemoteFileProvider.refresh();
+            }
         }
     
-        this.removeConnectionFromList(connection);
-    
-        vscode.window.showInformationMessage(`Connection to ${connection.host} has been removed.`);
-    }
+        if (this.multiCommandPanel) {
+            const connectedConnections = this.connections.filter(conn => conn.client);
+            this.multiCommandPanel.updateConnections(connectedConnections);
+        }
 
+        this.refresh();
+    
+        vscode.window.showInformationMessage(`Connection to ${connection.host} has been closed.`);
+    }
     // Method to remove a connection from the list
     private removeConnectionFromList(connection: ExtendedSSHConnection): void {
         // Remove the connection from the connections array
@@ -567,7 +578,6 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
     // Method to handle connection ready event
     private async handleConnectionReady(connection: ExtendedSSHConnection, treeItem: SSHConnectionTreeItem, terminalArgs: string, terminalEnv?: { [key: string]: string }) {
         connection.client!.on('ready', async () => {
-            console.log("Connection ready");
             vscode.window.showInformationMessage(`Connected to ${connection.host}`);
     
             treeItem.connected = true;
@@ -591,20 +601,14 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
 
     // Method to handle terminal selection change
     public handleTerminalSelectionChange(terminal: vscode.Terminal) {
-        console.log('Terminal selected:', terminal.name);
-    
         const connection = this.connections.find(conn => {
-            console.log('Checking connection:', conn);
             if (!conn.user || !conn.host) {
-                console.warn('Connection has undefined user or host:', conn);
                 return false;
             }
             return `${conn.user}@${conn.host}` === terminal.name;
         });
     
         if (connection) {
-            console.log('Connection found:', connection);
-    
             // Validate connection properties before creating the tree item
             const label = connection.user ? `${connection.user}@${connection.host}` : connection.host;
             if (!label) {
@@ -622,8 +626,6 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
                 console.error('Error updating tree view:', error);
                 vscode.window.showErrorMessage('Failed to update tree view.');
             }
-        } else {
-            console.warn('No matching connection found for terminal:', terminal.name);
         }
     }
 
@@ -641,7 +643,6 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
                 // Reuse the disconnect() function
                 this.disconnect(treeItem);
     
-                vscode.window.showInformationMessage(`Terminal for connection ${connection.host} has been closed.`);
             }
         }
     }
@@ -794,6 +795,27 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHConnectionTre
 
     public refresh(): void {
         this._onDidChangeTreeData.fire();
+
+        if (this.multiCommandPanel) {
+            const connectedConnections = this.connections.filter(conn => conn.client);
+            this.multiCommandPanel.updateConnections(connectedConnections);
+        } else {
+            console.warn('MultiCommandPanel is undefined.');
+        }
+    }
+
+    public setMultiCommandPanel(panel: MultiCommandPanel): void {
+        this.multiCommandPanel = panel;
+        const connectedConnections = this.connections.filter(conn => conn.client);
+        this.multiCommandPanel.updateConnections(connectedConnections);
+    }
+
+    public openMultiCommandPanel(): void {
+        vscode.commands.executeCommand('workbench.view.panel.multiCommandPanel');
+        if (this.multiCommandPanel) {
+            const connectedConnections = this.connections.filter(conn => conn.client);
+            this.multiCommandPanel.updateConnections(connectedConnections);
+        }
     }
 }
 
@@ -824,5 +846,82 @@ export class SSHFolderTreeItem extends vscode.TreeItem {
         this.tooltip = `Folder: ${folderName}`;
         this.description = folderName;
         this.contextValue = 'sshFolder';
+    }
+}
+
+export class MultiCommandPanel {
+    private connections: ExtendedSSHConnection[];
+    private terminals: Map<string, vscode.Terminal> = new Map();
+
+    constructor(private readonly view: vscode.WebviewView, connections: ExtendedSSHConnection[]) {
+        this.connections = connections;
+        this.view.webview.options = { enableScripts: true };
+    
+        // Listen to messages from the webview
+        this.view.webview.onDidReceiveMessage((message) => {
+            this.sendCommandToConnections(message.command, message.selectedConnections);
+        });
+    
+        // Update the webview when the panel becomes visible
+        this.view.onDidChangeVisibility(() => {
+            if (this.view.visible) {
+                this.updateWebview();
+            }
+        });
+    
+        this.updateWebview();
+    }
+
+    public updateConnections(connections: ExtendedSSHConnection[]): void {
+        const establishedConnections = connections.filter(conn => conn.client);
+    
+        this.connections = establishedConnections;
+        this.updateWebview();
+    }
+
+    private updateWebview(): void {
+        const htmlPath = MULTICOMMANDPANEL_HTML_PATH();
+        const cssPath = this.view.webview.asWebviewUri(vscode.Uri.file(MULTICOMMANDPANEL_CSS_PATH()));
+        const jsPath = this.view.webview.asWebviewUri(vscode.Uri.file(MULTICOMMANDPANEL_JS_PATH()));
+    
+        const htmlContent = fileUtils.readFile(htmlPath)
+            .replace('multiCommandPanel.css', cssPath.toString())
+            .replace('multiCommandPanel.js', jsPath.toString());
+    
+        this.view.webview.html = htmlContent;
+    
+        // Send updated connections to the webview
+        const connectionOptions = this.connections.map(conn => ({
+            id: conn.id,
+            user: conn.user,
+            host: conn.host
+        }));
+        this.view.webview.postMessage({ connections: connectionOptions });
+    }
+
+    private sendCommandToConnections(command: string, selectedConnectionIds: string[]) {
+        vscode.window.terminals.forEach((terminal) => {
+            const matchingConnection = this.connections.find(conn => terminal.name === `${conn.user}@${conn.host}`);
+            if (matchingConnection) {
+                this.terminals.set(matchingConnection.id, terminal);
+            }
+        });
+    
+        const selectedConnections = this.connections.filter(conn => selectedConnectionIds.includes(conn.id));
+    
+        if (selectedConnections.length === 0) {
+            vscode.window.showErrorMessage('No connections selected.');
+            return;
+        }
+    
+        selectedConnections.forEach(connection => {
+            const terminalName = `${connection.user}@${connection.host}`;
+            const existingTerminal = this.terminals.get(connection.id);
+            if (existingTerminal) {
+                existingTerminal.sendText(command);
+            } else {
+                vscode.window.showErrorMessage(`No existing terminal found for ${terminalName}`);
+            }
+        });
     }
 }

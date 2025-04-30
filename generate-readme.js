@@ -21,6 +21,7 @@ ${packageJson.description}
 - Browse and manage remote files.
 - Open remote files in the editor and save changes back to the server.
 - Organize SSH connections into groups for easy access.
+- Execute commands on multiple hosts simultaneously.
 
 ## Requirements
 
