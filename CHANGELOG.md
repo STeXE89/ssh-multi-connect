@@ -2,6 +2,14 @@
 
 All notable changes to the "ssh-multi-connect" extension will be documented in this file.
 
+## [0.0.7] - 2025/04/30
+
+### Added
+- New panel function allowing users to execute commands on selected multiple hosts simultaneously.
+
+### Changed
+- General code optimizations.
+
 ## [0.0.6] - 2025/04/23
 
 ### Fixed

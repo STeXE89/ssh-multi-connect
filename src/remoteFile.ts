@@ -13,6 +13,7 @@ export class RemoteFileViewTitle extends vscode.TreeItem {
 
 export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
     private static connectionProviders: Map<string, RemoteFileProvider> = new Map();
+    private static commandsRegistered = false;
 
     private _onDidChangeTreeData: vscode.EventEmitter<vscode.TreeItem | undefined | void> = new vscode.EventEmitter<vscode.TreeItem | undefined | void>();
     readonly onDidChangeTreeData: vscode.Event<vscode.TreeItem | undefined | void> = this._onDidChangeTreeData.event;
@@ -32,8 +33,37 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         return RemoteFileProvider.connectionProviders.get(connectionId);
     }
 
+    private static registerCommands() {
+        if (this.commandsRegistered) {
+            return; // Avoid duplicate registration
+        }
+
+        const createRemoteFileCommand = 'sshMultiConnect.createRemoteFile';
+        const createRemoteFolderCommand = 'sshMultiConnect.createRemoteFolder';
+
+        vscode.commands.getCommands().then(commands => {
+            if (!commands.includes(createRemoteFileCommand)) {
+                vscode.commands.registerCommand(createRemoteFileCommand, (node: RemoteFileTreeItem) => {
+                    const provider = this.getProviderByConnectionId(node.connection.id);
+                    provider?.createRemoteFile(node);
+                });
+            }
+
+            if (!commands.includes(createRemoteFolderCommand)) {
+                vscode.commands.registerCommand(createRemoteFolderCommand, (node: RemoteFileTreeItem) => {
+                    const provider = this.getProviderByConnectionId(node.connection.id);
+                    provider?.createRemoteFolder(node);
+                });
+            }
+        });
+
+        this.commandsRegistered = true; // Mark commands as registered
+    }
+
     // Static method to create or retrieve a provider
     public static createOrGetProvider(connection: ExtendedSSHConnection, currentPath: string): RemoteFileProvider {
+        this.registerCommands(); // Ensure commands are registered
+
         let provider = RemoteFileProvider.getProviderByConnectionId(connection.id);
         if (!provider) {
             provider = new RemoteFileProvider(connection, currentPath);
@@ -55,20 +85,6 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         const treeView = vscode.window.createTreeView('remoteFilesView', { treeDataProvider: this });
         treeView.onDidExpandElement(this.onDidExpandElement.bind(this));
         treeView.onDidCollapseElement(this.onDidCollapseElement.bind(this));
-
-        const createRemoteFileCommand = 'sshMultiConnect.createRemoteFile';
-        vscode.commands.getCommands().then(commands => {
-            if (!commands.includes(createRemoteFileCommand)) {
-                vscode.commands.registerCommand(createRemoteFileCommand, this.createRemoteFile.bind(this));
-            }
-        });
-
-        const createRemoteFolderCommand = 'sshMultiConnect.createRemoteFolder';
-        vscode.commands.getCommands().then(commands => {
-            if (!commands.includes(createRemoteFolderCommand)) {
-                vscode.commands.registerCommand(createRemoteFolderCommand, this.createRemoteFolder.bind(this));
-            }
-        });
     }
 
     setTitleItem(titleItem: RemoteFileViewTitle) {
@@ -319,7 +335,7 @@ export class RemoteFileTreeItem extends vscode.TreeItem {
     constructor(
         public readonly resourceUri: vscode.Uri,
         collapsibleState: vscode.TreeItemCollapsibleState,
-        private readonly connection: ExtendedSSHConnection,
+        public readonly connection: ExtendedSSHConnection,
         public readonly isDirectory: boolean
     ) {
         super(resourceUri, collapsibleState);

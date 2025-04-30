@@ -35,7 +35,12 @@ export function chmodSync(filePath: string, mode: fs.Mode): void {
 
 // Synchronous File Operations
 export function readFile(filePath: string): string {
-    return fs.readFileSync(filePath, 'utf-8');
+    try {
+        return fs.readFileSync(filePath, 'utf-8');
+    } catch (error) {
+        console.error(`Error reading file at ${filePath}:`, error);
+        throw new Error(`Failed to read file: ${path.basename(filePath)}`);
+    }
 }
 
 export function writeFile(filePath: string, content: string, mode: number) {
