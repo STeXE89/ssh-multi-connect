@@ -1,7 +1,7 @@
 {
   "name": "ssh-multi-connect",
   "displayName": "SSH Multi Connect",
-  "description": "This extension 'ssh-multi-connect' allows you to manage multiple SSH connections with terminals and remote files directly from Visual Studio Code at same time.",
+  "description": "This extension 'ssh-multi-connect' allows you to manage multiple SSH connections with terminals and remote files directly from Visual Studio Code at the same time.",
   "icon": "resources/icon.png",
   "license": "GPL-3.0-only",
   "author": {
@@ -13,7 +13,7 @@
     "type": "git",
     "url": "https://github.com/STeXE89/ssh-multi-connect.git"
   },
-  "version": "0.0.6",
+  "version": "0.0.7",
   "publisher": "STeXE89",
   "engines": {
     "vscode": "^1.96.0"
@@ -87,6 +87,13 @@
           "title": "SSH Multi Connect",
           "icon": "resources/icon.png"
         }
+      ],
+      "panel": [
+        {
+          "id": "sshMultiCommandPanel",
+          "title": "SSH Multi Command",
+          "icon": "resources/icon.png"
+        }
       ]
     },
     "views": {
@@ -101,6 +108,15 @@
           "name": "Remote Files",
           "icon": "resources/icon.png",
           "contextualTitle": "${remoteFileViewTitle}"
+        }
+      ],
+      "sshMultiCommandPanel": [
+        {
+          "id": "multiCommandView",
+          "name": "Send Command",
+          "icon": "resources/icon.png",
+          "type": "webview",
+          "contextualTitle": "Send Command to Multiple Connections"
         }
       ]
     },

@@ -1,6 +1,6 @@
 # SSH Multi Connect README
 
-This extension 'ssh-multi-connect' allows you to manage multiple SSH connections with terminals and remote files directly from Visual Studio Code at same time.
+This extension 'ssh-multi-connect' allows you to manage multiple SSH connections with terminals and remote files directly from Visual Studio Code at the same time.
 
 ## Features
 
@@ -9,6 +9,7 @@ This extension 'ssh-multi-connect' allows you to manage multiple SSH connections
 - Browse and manage remote files.
 - Open remote files in the editor and save changes back to the server.
 - Organize SSH connections into groups for easy access.
+- Execute commands on multiple hosts simultaneously.
 
 ## Requirements
 
@@ -29,6 +30,14 @@ This extension contributes the following settings:
 ## Release Notes
 
 Below some last release note, for more details see the CHANGELOG.md
+
+## [0.0.7] - 2025/04/30
+
+### Added
+- New panel function allowing users to execute commands on selected multiple hosts simultaneously.
+
+### Changed
+- General code optimizations.
 
 ## [0.0.6] - 2025/04/23
 
