@@ -31,6 +31,11 @@ This extension contributes the following settings:
 
 Below some last release note, for more details see the CHANGELOG.md
 
+## [0.0.8] - 2025/04/30
+
+### Fixed
+- Fixed file path for multi command panel
+
 ## [0.0.7] - 2025/04/30
 
 ### Added
