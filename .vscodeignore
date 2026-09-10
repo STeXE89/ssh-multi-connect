@@ -8,3 +8,5 @@ src/**
 **/*.map
 **/*.ts
 **/.vscode-test.*
+node_modules/cpu-features/**
+node_modules/nan/**

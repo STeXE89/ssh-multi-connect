@@ -1,44 +1,32 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { randomBytes } from 'crypto';
 
-// Directory Operations
 export function ensureDirectoryExists(dirPath: string, mode: number) {
     if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { mode });
     }
 }
 
-// File Existence and Permissions
 export function fileExists(filePath: string): boolean {
     return fs.existsSync(filePath);
 }
 
-export function ensureFileExists(filePath: string, mode: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-        if (!fs.existsSync(filePath)) {
-            try {
-                fs.writeFileSync(filePath, '', { mode });
-                resolve();
-            } catch (error) {
-                reject(error);
-            }
-        } else {
-            resolve();
-        }
-    });
+export function ensureFileExists(filePath: string, mode: number): void {
+    if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, '', { mode });
+    }
 }
 
 export function chmodSync(filePath: string, mode: fs.Mode): void {
     fs.chmodSync(filePath, mode);
 }
 
-// Synchronous File Operations
 export function readFile(filePath: string): string {
     try {
         return fs.readFileSync(filePath, 'utf-8');
-    } catch (error) {
-        console.error(`Error reading file at ${filePath}:`, error);
+    } catch {
         throw new Error(`Failed to read file: ${path.basename(filePath)}`);
     }
 }
@@ -51,7 +39,6 @@ export function appendToFile(filePath: string, content: string) {
     fs.appendFileSync(filePath, content);
 }
 
-// Asynchronous File Operations
 export function readFileAsync(filePath: string, encoding: BufferEncoding = 'utf-8'): Promise<string> {
     return new Promise((resolve, reject) => {
         fs.readFile(filePath, encoding, (err, data) => {
@@ -66,7 +53,7 @@ export function readFileAsync(filePath: string, encoding: BufferEncoding = 'utf-
 
 export function writeFileAsync(filePath: string, data: string, mode: number): Promise<void> {
     return new Promise((resolve, reject) => {
-        fs.writeFile(filePath, data, { mode }, (err) => {
+        fs.writeFile(filePath, data, { mode }, err => {
             if (err) {
                 reject(err);
             } else {
@@ -78,7 +65,7 @@ export function writeFileAsync(filePath: string, data: string, mode: number): Pr
 
 export function appendFileAsync(filePath: string, data: string): Promise<void> {
     return new Promise((resolve, reject) => {
-        fs.appendFile(filePath, data, (err) => {
+        fs.appendFile(filePath, data, err => {
             if (err) {
                 reject(err);
             } else {
@@ -88,34 +75,54 @@ export function appendFileAsync(filePath: string, data: string): Promise<void> {
     });
 }
 
-// File Deletion
 export function deleteFile(filePath: string): Promise<void> {
     return new Promise((resolve, reject) => {
-        fs.unlink(filePath, (err) => {
-            if (err) {
-                console.error(`Failed to delete file: ${filePath}`, err);
-                reject(err);
-            } else {
-                resolve();
-            }
-        });
+        fs.unlink(filePath, err => (err ? reject(err) : resolve()));
     });
 }
 
-// Temporary File Creation
+/**
+ * Returns a process-private directory for downloaded remote files.
+ *
+ * The shared system temp directory is world-readable on a multi-user host.
+ * This one is created 0700 and reused for the lifetime of the extension.
+ */
+let privateTempDir: string | undefined;
+
+export function getPrivateTempDir(): string {
+    if (!privateTempDir || !fs.existsSync(privateTempDir)) {
+        privateTempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ssh-multi-connect-'));
+        fs.chmodSync(privateTempDir, 0o700);
+    }
+    return privateTempDir;
+}
+
+/** Removes the private temp directory and everything left inside it. */
+export function removePrivateTempDir(): void {
+    if (privateTempDir && fs.existsSync(privateTempDir)) {
+        fs.rmSync(privateTempDir, { recursive: true, force: true });
+    }
+    privateTempDir = undefined;
+}
+
+/** Restricts a file to the current user. */
+export function restrictToOwner(filePath: string): void {
+    if (fs.existsSync(filePath)) {
+        fs.chmodSync(filePath, 0o600);
+    }
+}
+
 export function createTempFile(prefix: string, suffix: string): string {
     const tempDir = path.join(os.tmpdir(), prefix);
     if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir);
+        fs.mkdirSync(tempDir, { mode: 0o700, recursive: true });
     }
-    return path.join(tempDir, `${prefix}-${Date.now()}${suffix}`);
+    const unique = `${Date.now()}-${randomBytes(4).toString('hex')}`;
+    return path.join(tempDir, `${prefix}-${unique}${suffix}`);
 }
 
-// File Watching
 export function watchFile(filePath: string, listener: (eventType: string, filename: string) => void): fs.FSWatcher {
     return fs.watch(filePath, (eventType, filename) => {
-        if (filename) {
-            listener(eventType, filename);
-        }
+        listener(eventType, filename ?? path.basename(filePath));
     });
 }

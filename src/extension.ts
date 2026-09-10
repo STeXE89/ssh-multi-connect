@@ -1,47 +1,157 @@
 import * as vscode from 'vscode';
 import { setExtensionContext } from './constants/globals';
 import * as fileUtils from './utils/fileUtils';
-import { 
-    SSHViewProvider, 
-    SSHConnectionTreeItem, 
-    SSHFolderTreeItem, 
-    addSSHConnection, 
-    MultiCommandPanel 
+import {
+    SSHViewProvider,
+    SSHConnectionTreeItem,
+    SSHTreeNode,
+    activeConnectionBadge,
+    ExtendedSSHConnection,
+    addSSHConnection,
+    MultiCommandPanel,
 } from './sshConnection';
-import { EmptyRemoteFileProvider } from './remoteFile';
-import { SSH_CONFIG_PATH, checkAndInstallSshpass } from './utils/sshUtils';
+import { EmptyRemoteFileProvider, RemoteFileProvider, RemoteFileTreeItem } from './remoteFile';
+import { SSH_CONFIG_PATH, checkSshTooling } from './utils/sshUtils';
+import { RemoteFilesView } from './remoteFilesView';
+import { SSHTreeDecorationProvider } from './connectionDecorations';
+import { countInFolder } from './utils/folders';
+import { TerminalPathFollower } from './terminalFollow';
+import { TunnelManager } from './tunnels';
+import { SSHTunnelTreeItem } from './tunnelUi';
+import { followPathInTerminal } from './utils/settings';
+import { FileDetailsViewProvider } from './fileDetailsView';
+import { SSHTreeDragAndDropController } from './connectionDragAndDrop';
 
 export function activate(context: vscode.ExtensionContext) {
     setExtensionContext(context);
-    checkAndInstallSshpass();
+    checkSshTooling();
 
     const sshViewProvider = new SSHViewProvider(context);
-    const sshTreeView = createSSHTreeView(context, sshViewProvider);
+    createSSHTreeView(context, sshViewProvider);
 
-    registerEventListeners(context, sshViewProvider, sshTreeView);
-    registerCommands(context, sshViewProvider);
+    registerEventListeners(context, sshViewProvider);
+    const tunnels = new TunnelManager(
+        connectionId => sshViewProvider.connections.find(connection => connection.id === connectionId)?.client
+    );
+    context.subscriptions.push(
+        tunnels,
+        tunnels.onDidChange(() => sshViewProvider.refresh())
+    );
+    sshViewProvider.setTunnelManager(tunnels);
+
+    registerCommands(context, sshViewProvider, tunnels);
     monitorSSHConfigFile(context, sshViewProvider);
 
     registerTreeAndWebviewProviders(context, sshViewProvider);
+
+    const pathFollower = new TerminalPathFollower(followPathInTerminal);
+    const remoteFilesView = new RemoteFilesView(item => {
+        showRemoteItemDetails(item);
+        followSelectionInTerminal(item, sshViewProvider, pathFollower);
+    });
+    remoteFilesView.setProvider(new EmptyRemoteFileProvider());
+    context.subscriptions.push(remoteFilesView);
+    sshViewProvider.setRemoteFilesView(remoteFilesView);
+    sshViewProvider.setPathFollower(pathFollower);
+
+    const decorationProvider = new SSHTreeDecorationProvider(
+        (connectionId: string) =>
+            sshViewProvider.connections.some(connection => connection.id === connectionId && !!connection.client),
+        (folderPath: string) =>
+            countInFolder(
+                sshViewProvider.connections.map(connection => connection.vFolderTag),
+                folderPath
+            )
+    );
+    context.subscriptions.push(decorationProvider, vscode.window.registerFileDecorationProvider(decorationProvider));
+    sshViewProvider.setDecorationProvider(decorationProvider);
+
+    const detailsView = new FileDetailsViewProvider();
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider(FileDetailsViewProvider.viewId, detailsView));
+    sshViewProvider.setDetailsView(detailsView);
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('sshMultiConnect.editPermissions', async (node: RemoteFileTreeItem) => {
+            const provider = node?.connection && RemoteFileProvider.getProviderByConnectionId(node.connection.id);
+            if (!provider) {
+                vscode.window.showErrorMessage('No remote file provider found for this item.');
+                return;
+            }
+            await provider.editPermissions(node);
+        })
+    );
+}
+
+/**
+ * Shows the selected remote item's details in the Edit Permissions panel.
+ *
+ * The panel is updated but not focused, so browsing the tree with the arrow
+ * keys is not interrupted.
+ *
+ * @param item The item selected in the remote files tree.
+ */
+function showRemoteItemDetails(item: vscode.TreeItem): void {
+    if (!(item instanceof RemoteFileTreeItem)) {
+        return;
+    }
+
+    const provider = RemoteFileProvider.getProviderByConnectionId(item.connection.id);
+    provider?.showDetails(item).catch((error: unknown) => {
+        console.error(`Could not show details for ${item.resourceUri.path}:`, error);
+    });
+}
+
+/**
+ * Changes the connection's terminal to the selected directory, when enabled.
+ *
+ * @param item The item selected in the remote files tree.
+ * @param sshViewProvider Supplies the connection's terminal.
+ * @param follower Decides whether a change is warranted.
+ */
+function followSelectionInTerminal(
+    item: vscode.TreeItem,
+    sshViewProvider: SSHViewProvider,
+    follower: TerminalPathFollower
+): void {
+    if (!(item instanceof RemoteFileTreeItem)) {
+        return;
+    }
+
+    const terminal = sshViewProvider.getTerminal(item.connection.id);
+    if (!terminal) {
+        return;
+    }
+
+    follower.follow(item.connection.id, item.resourceUri.path, item.isDirectory, text => terminal.sendText(text));
 }
 
 function createSSHTreeView(
-    context: vscode.ExtensionContext, 
+    context: vscode.ExtensionContext,
     sshViewProvider: SSHViewProvider
-): vscode.TreeView<SSHConnectionTreeItem | SSHFolderTreeItem> {
+): vscode.TreeView<SSHTreeNode> {
     const sshTreeView = vscode.window.createTreeView('sshConnectionsView', {
-        treeDataProvider: sshViewProvider
+        treeDataProvider: sshViewProvider,
+        showCollapseAll: true,
+        canSelectMany: true,
+        dragAndDropController: new SSHTreeDragAndDropController(sshViewProvider),
     });
 
+    const showConnectionCount = () => {
+        sshTreeView.badge = activeConnectionBadge(sshViewProvider.connections);
+    };
+    showConnectionCount();
+
     context.subscriptions.push(
-        sshTreeView.onDidChangeSelection(event => handleTreeViewSelection(event, sshViewProvider))
+        sshTreeView,
+        sshTreeView.onDidChangeSelection(event => handleTreeViewSelection(event, sshViewProvider)),
+        sshViewProvider.onDidChangeTreeData(showConnectionCount)
     );
 
     return sshTreeView;
 }
 
 function handleTreeViewSelection(
-    event: vscode.TreeViewSelectionChangeEvent<SSHConnectionTreeItem | SSHFolderTreeItem>, 
+    event: vscode.TreeViewSelectionChangeEvent<SSHTreeNode>,
     sshViewProvider: SSHViewProvider
 ) {
     const selectedItem = event.selection[0];
@@ -50,11 +160,7 @@ function handleTreeViewSelection(
     }
 }
 
-function registerEventListeners(
-    context: vscode.ExtensionContext, 
-    sshViewProvider: SSHViewProvider, 
-    sshTreeView: vscode.TreeView<SSHConnectionTreeItem | SSHFolderTreeItem>
-) {
+function registerEventListeners(context: vscode.ExtensionContext, sshViewProvider: SSHViewProvider) {
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTerminal(terminal => {
             if (terminal) {
@@ -66,26 +172,83 @@ function registerEventListeners(
     );
 }
 
-function handleVisibleTextEditorsChange(
-    editors: readonly vscode.TextEditor[], 
-    sshViewProvider: SSHViewProvider
-) {
+function handleVisibleTextEditorsChange(editors: readonly vscode.TextEditor[], sshViewProvider: SSHViewProvider) {
     const activeEditor = editors.find(editor => editor.document.uri.scheme === 'ssh');
     if (activeEditor) {
         sshViewProvider.handleRemoteFileSelectionChange(activeEditor.document.uri);
     }
 }
 
-function registerCommands(context: vscode.ExtensionContext, sshViewProvider: SSHViewProvider) {
+function registerCommands(context: vscode.ExtensionContext, sshViewProvider: SSHViewProvider, tunnels: TunnelManager) {
     const commands = [
         { command: 'sshMultiConnect.addConnection', callback: () => addSSHConnection(sshViewProvider) },
-        { command: 'sshMultiConnect.connect', callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.connect(treeItem) },
-        { command: 'sshMultiConnect.disconnect', callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.disconnect(treeItem) },
-        { command: 'sshMultiConnect.removeConnection', callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.removeConnection(treeItem) },
-        { command: 'sshMultiConnect.moveToFolder', callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.moveConnectionToFolder(treeItem) },
-        { command: 'sshMultiConnect.openRemoteFile', callback: async (resourceUri: vscode.Uri, treeItem: SSHConnectionTreeItem) => openRemoteFile(resourceUri, treeItem, sshViewProvider) },
+        {
+            command: 'sshMultiConnect.connect',
+            callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.connect(treeItem),
+        },
+        {
+            command: 'sshMultiConnect.disconnect',
+            callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.disconnect(treeItem),
+        },
+        {
+            command: 'sshMultiConnect.removeConnection',
+            callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.removeConnection(treeItem),
+        },
+        {
+            command: 'sshMultiConnect.moveToFolder',
+            callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.moveConnectionToFolder(treeItem),
+        },
+        {
+            command: 'sshMultiConnect.openRemoteFile',
+            callback: async (first: unknown, second: unknown) => openRemoteFile(first, second),
+        },
+        {
+            command: 'sshMultiConnect.renameRemote',
+            callback: (node: RemoteFileTreeItem) => withRemoteProvider(node, provider => provider.renameItem(node)),
+        },
+        {
+            command: 'sshMultiConnect.deleteRemote',
+            callback: (node: RemoteFileTreeItem) => withRemoteProvider(node, provider => provider.deleteItem(node)),
+        },
+        {
+            command: 'sshMultiConnect.addTunnel',
+            callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.addTunnel(treeItem),
+        },
+        {
+            command: 'sshMultiConnect.startTunnel',
+            callback: (item: SSHTunnelTreeItem) => tunnels.start(item.connectionId, item.entry.config.id),
+        },
+        {
+            command: 'sshMultiConnect.stopTunnel',
+            callback: (item: SSHTunnelTreeItem) => tunnels.stop(item.connectionId, item.entry.config.id),
+        },
+        {
+            command: 'sshMultiConnect.removeTunnel',
+            callback: (item: SSHTunnelTreeItem) => tunnels.remove(item.connectionId, item.entry.config.id),
+        },
+        {
+            command: 'sshMultiConnect.openSettings',
+            // Filtering by the extension's own id shows exactly its settings,
+            // and survives a rename of the publisher or the extension.
+            callback: () =>
+                vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${context.extension.id}`),
+        },
+        {
+            command: 'sshMultiConnect.copyRemotePath',
+            callback: (node: RemoteFileTreeItem) => withRemoteProvider(node, provider => provider.copyPath(node)),
+        },
         { command: 'sshMultiConnect.refreshRemoteFiles', callback: () => refreshRemoteFiles(sshViewProvider) },
-        { command: 'sshMultiConnect.openMultiCommandPanel', callback: () => sshViewProvider.openMultiCommandPanel() }
+        { command: 'sshMultiConnect.openMultiCommandPanel', callback: () => sshViewProvider.openMultiCommandPanel() },
+        {
+            command: 'sshMultiConnect.createRemoteFile',
+            callback: (node: RemoteFileTreeItem) =>
+                RemoteFileProvider.getProviderByConnectionId(node.connection.id)?.createRemoteFile(node),
+        },
+        {
+            command: 'sshMultiConnect.createRemoteFolder',
+            callback: (node: RemoteFileTreeItem) =>
+                RemoteFileProvider.getProviderByConnectionId(node.connection.id)?.createRemoteFolder(node),
+        },
     ];
 
     commands.forEach(({ command, callback }) => {
@@ -93,19 +256,53 @@ function registerCommands(context: vscode.ExtensionContext, sshViewProvider: SSH
     });
 }
 
-async function openRemoteFile(
-    resourceUri: vscode.Uri, 
-    treeItem: SSHConnectionTreeItem, 
-    sshViewProvider: SSHViewProvider
-) {
-    if (!treeItem.id) {
+/**
+ * Runs an action against the provider that owns a tree item.
+ *
+ * @param node The item the command was invoked on.
+ * @param action What to do with its provider.
+ */
+function withRemoteProvider(
+    node: RemoteFileTreeItem,
+    action: (provider: RemoteFileProvider) => Promise<void> | void
+): void {
+    const provider = node?.connection && RemoteFileProvider.getProviderByConnectionId(node.connection.id);
+    if (!provider) {
+        vscode.window.showErrorMessage('No remote file provider found for this item.');
+        return;
+    }
+
+    void Promise.resolve(action(provider)).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Remote file action failed: ${message}`);
+    });
+}
+
+/**
+ * Opens a remote file, however the command was invoked.
+ *
+ * Clicking a row passes `[resourceUri, connection]` from the item's own
+ * command, while the context menu passes the tree item itself.
+ *
+ * @param first The URI or the tree item.
+ * @param second The connection, when the first argument is a URI.
+ */
+async function openRemoteFile(first: unknown, second: unknown) {
+    const target =
+        first instanceof RemoteFileTreeItem
+            ? { uri: first.resourceUri, connectionId: first.connection?.id }
+            : first instanceof vscode.Uri
+              ? { uri: first, connectionId: (second as ExtendedSSHConnection | undefined)?.id }
+              : undefined;
+
+    if (!target?.connectionId) {
         vscode.window.showErrorMessage('Invalid connection ID.');
         return;
     }
 
-    const remoteFileProvider = sshViewProvider.getRemoteFileProvider(treeItem.id);
+    const remoteFileProvider = RemoteFileProvider.getProviderByConnectionId(target.connectionId);
     if (remoteFileProvider) {
-        await remoteFileProvider.openRemoteFile(resourceUri);
+        await remoteFileProvider.openRemoteFile(target.uri);
     } else {
         vscode.window.showErrorMessage('No connection selected.');
     }
@@ -131,31 +328,26 @@ async function monitorSSHConfigFile(context: vscode.ExtensionContext, sshViewPro
             }
         });
         context.subscriptions.push(new vscode.Disposable(() => watcher.close()));
-    } catch (error) {
-        console.error(`File ${SSH_CONFIG_PATH} does not exist.`);
+    } catch {
+        // No ssh_config yet is the normal state on a fresh machine; it is
+        // created when the first connection is added.
     }
 }
 
 function registerTreeAndWebviewProviders(context: vscode.ExtensionContext, sshViewProvider: SSHViewProvider) {
-    vscode.window.registerTreeDataProvider('remoteFilesView', new EmptyRemoteFileProvider());
-    vscode.window.registerWebviewViewProvider('multiCommandView', {
-        resolveWebviewView: (webviewView) => {
-            const connectedConnections = sshViewProvider.connections.filter(conn => conn.client) || [];
-            const multiCommandPanel = new MultiCommandPanel(webviewView, connectedConnections);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider('multiCommandView', {
+            resolveWebviewView: webviewView => {
+                const connectedConnections = sshViewProvider.connections.filter(conn => conn.client);
+                const multiCommandPanel = new MultiCommandPanel(webviewView, connectedConnections);
 
-            sshViewProvider.setMultiCommandPanel(multiCommandPanel);
-            sshViewProvider.refresh();
-        }
-    });
+                sshViewProvider.setMultiCommandPanel(multiCommandPanel);
+                sshViewProvider.refresh();
+            },
+        })
+    );
 }
 
 export function deactivate() {
-    console.log('Cleaning up resources...');
-    vscode.window.terminals
-        .filter(terminal => terminal.name.startsWith('SSH:'))
-        .forEach(terminal => terminal.dispose());
-
-    vscode.workspace.textDocuments
-        .filter(document => ['ssh', 'vscode-remote'].includes(document.uri.scheme))
-        .forEach(document => vscode.commands.executeCommand('workbench.action.closeActiveEditor'));
+    RemoteFileProvider.disposeAll();
 }
