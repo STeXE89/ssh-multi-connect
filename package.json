@@ -389,10 +389,11 @@
     "lint": "eslint src",
     "test": "vscode-test",
     "generate-readme": "node generate-readme.js",
-    "publish": "vsce publish --target linux-x64 linux-arm64 linux-armhf",
-    "publish:pre-release": "vsce publish --pre-release --target linux-x64 linux-arm64 linux-armhf",
+    "publish": "vsce publish",
+    "publish:pre-release": "vsce publish --pre-release",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "package": "vsce package"
   },
   "dependencies": {
     "ssh2": "^1.16.0"
@@ -401,7 +402,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.19.0",
     "@types/ssh2": "^1.15.5",
-    "@types/vscode": "^1.100.0",
+    "@types/vscode": "~1.96.0",
     "@typescript-eslint/eslint-plugin": "^8.34.0",
     "@typescript-eslint/parser": "^8.34.0",
     "@vscode/test-cli": "^0.0.10",
