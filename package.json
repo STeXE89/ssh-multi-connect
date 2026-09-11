@@ -1,7 +1,7 @@
 {
   "name": "ssh-multi-connect",
   "displayName": "SSH Multi Connect",
-  "description": "This extension 'ssh-multi-connect' allows you to manage multiple SSH connections with terminals and remote files directly from Visual Studio Code at the same time.",
+  "description": "This extension 'ssh-multi-connect' allows you to group SSH connections into folders and manage remote files and run commands on terminals even at the same time on multiple connections directly from Visual Studio Code.",
   "icon": "resources/icon.png",
   "license": "GPL-3.0-only",
   "author": {
@@ -13,7 +13,7 @@
     "type": "git",
     "url": "https://github.com/STeXE89/ssh-multi-connect.git"
   },
-  "version": "0.0.8",
+  "version": "0.0.9",
   "publisher": "STeXE89",
   "engines": {
     "vscode": "^1.96.0"
@@ -78,6 +78,60 @@
         "icon": "$(sync)",
         "title": "Refresh Remote Files",
         "tooltip": "Refresh Remote Files"
+      },
+      {
+        "command": "sshMultiConnect.editPermissions",
+        "icon": "$(key)",
+        "title": "Edit Permissions",
+        "tooltip": "Edit Permissions"
+      },
+      {
+        "command": "sshMultiConnect.renameRemote",
+        "icon": "$(edit)",
+        "title": "Rename...",
+        "tooltip": "Rename"
+      },
+      {
+        "command": "sshMultiConnect.deleteRemote",
+        "icon": "$(trash)",
+        "title": "Delete",
+        "tooltip": "Delete"
+      },
+      {
+        "command": "sshMultiConnect.copyRemotePath",
+        "icon": "$(clippy)",
+        "title": "Copy Path",
+        "tooltip": "Copy Path"
+      },
+      {
+        "command": "sshMultiConnect.openSettings",
+        "icon": "$(gear)",
+        "title": "SSH Multi Connect Settings",
+        "tooltip": "Open SSH Multi Connect settings"
+      },
+      {
+        "command": "sshMultiConnect.addTunnel",
+        "icon": "$(plug)",
+        "title": "Add Tunnel...",
+        "tooltip": "Open a port forward over this connection"
+      },
+      {
+        "command": "sshMultiConnect.startTunnel",
+        "icon": "$(debug-start)",
+        "title": "Start Tunnel",
+        "tooltip": "Start this tunnel"
+      },
+      {
+        "command": "sshMultiConnect.stopTunnel",
+        "icon": "$(debug-stop)",
+        "title": "Stop Tunnel",
+        "tooltip": "Stop this tunnel"
+      },
+      {
+        "command": "sshMultiConnect.removeTunnel",
+        "icon": "$(trash)",
+        "title": "Remove Tunnel",
+        "tooltip": "Stop and remove this tunnel"
       }
     ],
     "viewsContainers": {
@@ -85,14 +139,7 @@
         {
           "id": "sshMultiConnect",
           "title": "SSH Multi Connect",
-          "icon": "resources/icon.png"
-        }
-      ],
-      "panel": [
-        {
-          "id": "sshMultiCommandPanel",
-          "title": "SSH Multi Command",
-          "icon": "resources/icon.png"
+          "icon": "resources/icon.svg"
         }
       ]
     },
@@ -100,25 +147,37 @@
       "sshMultiConnect": [
         {
           "id": "sshConnectionsView",
-          "name": "SSH Connections",
-          "icon": "resources/icon.png"
+          "name": "SSH Connections"
         },
         {
           "id": "remoteFilesView",
           "name": "Remote Files",
-          "icon": "resources/icon.png",
-          "contextualTitle": "${remoteFileViewTitle}"
-        }
-      ],
-      "sshMultiCommandPanel": [
+          "contextualTitle": "Remote Files"
+        },
+        {
+          "id": "remoteFileDetailsView",
+          "name": "File Details",
+          "type": "webview",
+          "contextualTitle": "File Details"
+        },
         {
           "id": "multiCommandView",
-          "name": "Send Command",
-          "icon": "resources/icon.png",
+          "name": "Send Multiple Command",
           "type": "webview",
-          "contextualTitle": "Send Command to Multiple Connections"
+          "description": "Send Command to Multiple Connections",
+          "contextualTitle": "Send Multiple Command"
         }
       ]
+    },
+    "configuration": {
+      "title": "SSH Multi Connect",
+      "properties": {
+        "sshMultiConnect.followPathInTerminal": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Change the connection's terminal to the directory you select in **Remote Files**. Selecting a file uses its parent folder.\n\nThe `cd` is typed into the terminal, so it can disturb a command that is already running there. It is only sent when the directory actually changes."
+        }
+      }
     },
     "menus": {
       "view/title": [
@@ -131,6 +190,11 @@
           "command": "sshMultiConnect.refreshRemoteFiles",
           "when": "view == remoteFilesView",
           "group": "navigation"
+        },
+        {
+          "command": "sshMultiConnect.openSettings",
+          "when": "view == sshConnectionsView",
+          "group": "navigation@99"
         }
       ],
       "view/item/context": [
@@ -156,13 +220,88 @@
         },
         {
           "command": "sshMultiConnect.createRemoteFile",
-          "when": "view == remoteFilesView && viewItem == remoteDirectory",
-          "group": "inline"
+          "when": "viewItem == remoteDirectory",
+          "group": "inline@1"
         },
         {
           "command": "sshMultiConnect.createRemoteFolder",
           "when": "viewItem == remoteDirectory",
-          "group": "inline"
+          "group": "inline@2"
+        },
+        {
+          "command": "sshMultiConnect.openRemoteFile",
+          "when": "viewItem == remoteFile",
+          "group": "1_open@1"
+        },
+        {
+          "command": "sshMultiConnect.createRemoteFile",
+          "when": "viewItem == remoteDirectory",
+          "group": "2_new@1"
+        },
+        {
+          "command": "sshMultiConnect.createRemoteFolder",
+          "when": "viewItem == remoteDirectory",
+          "group": "2_new@2"
+        },
+        {
+          "command": "sshMultiConnect.editPermissions",
+          "when": "viewItem == remoteDirectory || viewItem == remoteFile",
+          "group": "3_modify@1"
+        },
+        {
+          "command": "sshMultiConnect.renameRemote",
+          "when": "viewItem == remoteDirectory || viewItem == remoteFile",
+          "group": "3_modify@2"
+        },
+        {
+          "command": "sshMultiConnect.copyRemotePath",
+          "when": "viewItem == remoteDirectory || viewItem == remoteFile",
+          "group": "4_copy@1"
+        },
+        {
+          "command": "sshMultiConnect.deleteRemote",
+          "when": "viewItem == remoteDirectory || viewItem == remoteFile",
+          "group": "9_danger@1"
+        },
+        {
+          "command": "sshMultiConnect.addTunnel",
+          "when": "viewItem == sshConnectionConnected",
+          "group": "inline@0"
+        },
+        {
+          "command": "sshMultiConnect.addTunnel",
+          "when": "viewItem == sshConnectionConnected",
+          "group": "5_tunnel@1"
+        },
+        {
+          "command": "sshMultiConnect.startTunnel",
+          "when": "viewItem == sshTunnelDown",
+          "group": "inline@1"
+        },
+        {
+          "command": "sshMultiConnect.stopTunnel",
+          "when": "viewItem == sshTunnelUp",
+          "group": "inline@1"
+        },
+        {
+          "command": "sshMultiConnect.removeTunnel",
+          "when": "viewItem == sshTunnelUp || viewItem == sshTunnelDown",
+          "group": "inline@2"
+        },
+        {
+          "command": "sshMultiConnect.startTunnel",
+          "when": "viewItem == sshTunnelDown",
+          "group": "1_state@1"
+        },
+        {
+          "command": "sshMultiConnect.stopTunnel",
+          "when": "viewItem == sshTunnelUp",
+          "group": "1_state@1"
+        },
+        {
+          "command": "sshMultiConnect.removeTunnel",
+          "when": "viewItem == sshTunnelUp || viewItem == sshTunnelDown",
+          "group": "9_danger@1"
         }
       ],
       "editor/title": [
@@ -170,6 +309,68 @@
           "command": "sshMultiConnect.openRemoteFile",
           "when": "resourceLangId == markdown",
           "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "sshMultiConnect.connect",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.disconnect",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.removeConnection",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.moveToFolder",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.openRemoteFile",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.createRemoteFile",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.createRemoteFolder",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.editPermissions",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.renameRemote",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.deleteRemote",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.copyRemotePath",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.addTunnel",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.startTunnel",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.stopTunnel",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.removeTunnel",
+          "when": "false"
         }
       ]
     },
@@ -184,28 +385,30 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
+    "pretest": "npm run compile && npm run lint && npm run format:check",
     "lint": "eslint src",
     "test": "vscode-test",
     "generate-readme": "node generate-readme.js",
-    "publish": "vsce publish --target linux-x64 linux-arm64 linux-armhf",
-    "publish:pre-release": "vsce publish --pre-release --target linux-x64 linux-arm64 linux-armhf"
+    "publish": "vsce publish",
+    "publish:pre-release": "vsce publish --pre-release",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "package": "vsce package"
   },
   "dependencies": {
-    "ssh2": "^1.16.0",
-    "tmp": "^0.2.3"
+    "ssh2": "^1.16.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
-    "@types/node": "20.x",
-    "@types/ssh2": "^1.15.4",
-    "@types/tmp": "^0.2.6",
-    "@types/vscode": "^1.96.0",
-    "@typescript-eslint/eslint-plugin": "^8.17.0",
-    "@typescript-eslint/parser": "^8.17.0",
+    "@types/node": "^20.19.0",
+    "@types/ssh2": "^1.15.5",
+    "@types/vscode": "~1.96.0",
+    "@typescript-eslint/eslint-plugin": "^8.34.0",
+    "@typescript-eslint/parser": "^8.34.0",
     "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.4.1",
-    "eslint": "^9.16.0",
-    "typescript": "^5.7.2"
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.28.0",
+    "prettier": "^3.9.6",
+    "typescript": "^5.8.3"
   }
 }

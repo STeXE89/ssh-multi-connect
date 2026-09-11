@@ -20,24 +20,70 @@ ${packageJson.description}
 - Connect and disconnect from SSH servers.
 - Browse and manage remote files.
 - Open remote files in the editor and save changes back to the server.
-- Organize SSH connections into groups for easy access.
+- Organize SSH connections into folders, with drag and drop.
 - Execute commands on multiple hosts simultaneously.
+- Open local and remote SSH tunnels, with start/stop control and live state.
+- Inspect remote files and folders, and edit their permissions and ownership.
+- Create, rename and delete remote files and folders from the right-click menu.
+- Retry an operation with sudo when the remote user lacks permission.
+- Runs on Windows, macOS and Linux.
 
 ## Requirements
 
 - Visual Studio Code version 1.96.0 or higher.
-- \`sshpass\` installed on your local machine for password-based SSH connections.
+- The OpenSSH command-line tools (\`ssh-keygen\`, \`ssh-keyscan\`) on your PATH, used for host key verification.
+  They ship with Linux and macOS. On Windows they come with the *OpenSSH Client*
+  optional feature, which is present by default on Windows 10 1809 and later.
+
+No \`sshpass\` and no external \`ssh\` binary are required: terminals run over the
+extension's own SSH connection.
+
+## Tunnels
+
+A tunnel forwards a port over an existing SSH connection. Use the plug button on
+a connected host, then answer four questions.
+
+The destination host is the one that trips people up: it is resolved by the
+machine at the *far* end of the tunnel, not by the machine you are sitting at.
+To reach a port on the server itself, the answer is \`localhost\`.
+
+**Reach the remote host's SSH port on local port 2223:**
+
+| Question | Answer |
+| --- | --- |
+| Kind | Local forward |
+| Interface | Localhost only |
+| Port to open on this machine | \`2223\` |
+| Where should the traffic end up | the server itself (\`localhost\`) |
+| Port | \`22\` |
+
+Equivalent to \`ssh -L 127.0.0.1:2223:localhost:22\`, so \`ssh -p 2223 user@127.0.0.1\`
+reaches the remote host.
+
+**Reach a database the server can see, on local port 5432:** the same, but choose
+*Another host* and enter \`db.internal\`.
+
+**Remote forward** (\`-R\`) reverses it: a port opened on the server reaches a host
+your machine can see. The server needs \`AllowTcpForwarding yes\`, plus
+\`GatewayPorts yes\` to bind anything other than its own localhost.
 
 ## Extension Settings
 
 This extension contributes the following settings:
 
-* \`sshMultiConnect.enable\`: Enable/disable this extension.
+* \`sshMultiConnect.followPathInTerminal\` (default \`false\`): change the connection's
+  terminal to the directory you select in **Remote Files**. Selecting a file uses its
+  parent folder. The \`cd\` is typed into the terminal, so it can disturb a command that
+  is already running there; it is only sent when the directory actually changes.
 
 ## Known Issues
 
-- Currently, work only on unix-like systems, windows not supported.
-- The extension may not handle large file transfers efficiently.
+- Owner and group *names*, and folder sizes, need a POSIX remote host: they read
+  \`/etc/passwd\` and \`/etc/group\` and run \`du\`. On other servers the File Details
+  panel falls back to raw uid/gid and reports the size as unavailable, rather
+  than failing.
+- Changing owner or group normally requires root on the remote host. When it is
+  refused, the mode change is still applied and reported separately.
 
 ## Release Notes
 

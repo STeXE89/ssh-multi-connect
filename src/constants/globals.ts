@@ -24,6 +24,18 @@ export function getExtensionPath(): string {
 }
 
 /**
+ * Retrieves the extension's root URI from the context.
+ * Throws an error if the context is not set.
+ * @returns The extension root URI.
+ */
+export function getExtensionUri(): vscode.Uri {
+    if (!extensionContext) {
+        throw new Error('Extension context is not set. Ensure setExtensionContext is called during activation.');
+    }
+    return extensionContext.extensionUri;
+}
+
+/**
  * Generates a full path to a file in the extension's directory.
  * @param relativePath - The relative path to the file from the extension root.
  * @returns The full path to the file.

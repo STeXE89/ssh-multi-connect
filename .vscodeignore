@@ -8,3 +8,15 @@ src/**
 **/*.map
 **/*.ts
 **/.vscode-test.*
+node_modules/cpu-features/**
+node_modules/nan/**
+out/test/**
+.editorconfig
+.prettierrc.json
+.prettierignore
+.npmrc
+generate-readme.js
+images/**
+node_modules/ssh2/lib/protocol/crypto/build/**
+node_modules/ssh2/lib/protocol/crypto/src/**
+node_modules/ssh2/lib/protocol/crypto/binding.gyp
