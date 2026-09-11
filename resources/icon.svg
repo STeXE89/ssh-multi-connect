@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 155 155" fill="currentColor">
+  <!--
+    Activity bar icon. VS Code applies it as a CSS mask tinted with the theme
+    colour, so it is one shape and the colour here is irrelevant.
+
+    The circle is the same size and position as the activity bar badge
+    (.badge-content: 16px, top 24, right 8, in the 48px item; the icon is a
+    24px mask centred in it), so a connection-count badge lands exactly on it
+    and hides the cursor underneath.
+
+    The cursor keeps the original artwork's proportions (60 degree apex, a
+    trailing arc of the circle's own radius) but is exactly symmetric about
+    the tile diagonal: apex on it, tips mirrored across it.
+  -->
+  <clipPath id="ssh-multi-connect-tile">
+    <rect width="155" height="155" rx="32.5" />
+  </clipPath>
+  <path clip-path="url(#ssh-multi-connect-tile)" fill-rule="evenodd" d="M0 0h155v155H0ZM27 29 53 46.5 53 56.5 27 74 27 63 44 51.5 27 40ZM42 72h41v10H42ZM77.5 129.17a51.67 51.67 0 1 1 103.33 0a51.67 51.67 0 1 1 -103.33 0ZM96.46 96.46L152.97 111.6A51.67 51.67 0 0 0 111.6 152.97Z" />
+</svg>

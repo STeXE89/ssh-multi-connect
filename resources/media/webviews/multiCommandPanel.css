@@ -1,24 +1,71 @@
-body {
-    background-color: var(--vscode-editor-background);
-    color: var(--vscode-editor-foreground);
-    font-family: var(--vscode-font-family);
-    margin: 16px;
+* {
+    box-sizing: border-box;
 }
 
-select, textarea, input, button {
+body {
+    background-color: transparent;
+    color: var(--vscode-foreground);
+    font-family: var(--vscode-font-family);
+    font-size: var(--vscode-font-size);
+    /* Sized for the sidebar, which is much narrower than the old panel. */
+    margin: 0;
+    padding: 12px;
+}
+
+h3 {
+    margin: 0 0 6px;
+    font-size: 0.78em;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--vscode-descriptionForeground);
+}
+
+h3 + * {
+    margin-top: 0;
+}
+
+.field {
+    margin-bottom: 14px;
+}
+
+select,
+textarea,
+input {
+    width: 100%;
+    padding: 4px 6px;
     background-color: var(--vscode-input-background);
     color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border);
+    border: 1px solid var(--vscode-input-border, transparent);
+    border-radius: 2px;
 }
 
-select:focus, textarea:focus, button:focus {
+select {
+    /* Tall enough to be usable, short enough to leave room below. */
+    height: 96px;
+}
+
+select:focus,
+textarea:focus,
+button:focus {
     outline: 1px solid var(--vscode-focusBorder);
 }
 
 button {
+    width: 100%;
     cursor: pointer;
-    margin-top: 8px;
-    padding: 6px 12px;
+    margin-top: 4px;
+    padding: 5px 12px;
+    border: none;
+    border-radius: 2px;
+    font-family: inherit;
+    font-size: inherit;
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+}
+
+button:hover:enabled {
+    background-color: var(--vscode-button-hoverBackground);
 }
 
 button:disabled {
@@ -28,6 +75,7 @@ button:disabled {
 
 .info {
     font-size: 0.9em;
+    line-height: 1.35;
     color: var(--vscode-descriptionForeground);
-    margin-top: 8px;
+    margin-top: 6px;
 }
