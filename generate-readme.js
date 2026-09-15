@@ -166,6 +166,14 @@ once -- they will not chase each other.
   Three missed probes end the connection, so the default notices a drop in about 90
   seconds. 0 disables probing.
 
+* \`sshMultiConnect.suggestVersionChannel\` (default \`true\`): offer to move between
+  the release and pre-release versions of this extension when the other one has more
+  to give. At most once a day the marketplace is asked which versions exist: on a
+  pre-release whose stable line has caught up you are offered the release, and on a
+  release you are offered a pre-release that is genuinely ahead. Only this extension's
+  identifier is sent, a failure is silent, and a version you turn down is not offered
+  again.
+
 * \`sshMultiConnect.savePasswords\` (default \`false\`): keep the passwords you type in
   the operating system's keychain, so a host does not ask again. While it is off, a
   password is only held in memory for the life of the connection. **Forget Saved

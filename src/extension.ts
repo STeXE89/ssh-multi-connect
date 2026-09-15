@@ -23,6 +23,7 @@ import { CommandResultsDocuments, RESULTS_SCHEME } from './commandResultsDocumen
 import { copyToHost } from './remoteCopyUi';
 import { downloadRemote } from './remoteDownloadUi';
 import { uploadToRemote } from './remoteUploadUi';
+import { checkReleaseChannel } from './releaseCheck';
 import { runCommandOnHosts } from './multiCommandUi';
 import { SSHTunnelTreeItem } from './tunnelUi';
 import { followPathInTerminal } from './utils/settings';
@@ -32,6 +33,10 @@ import { SSHTreeDragAndDropController } from './connectionDragAndDrop';
 export function activate(context: vscode.ExtensionContext) {
     setExtensionContext(context);
     checkSshTooling();
+
+    // Not awaited: a marketplace that is slow or unreachable must not hold up
+    // the extension starting.
+    void checkReleaseChannel(context);
 
     const sshViewProvider = new SSHViewProvider(context);
     createSSHTreeView(context, sshViewProvider);

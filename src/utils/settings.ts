@@ -50,3 +50,12 @@ export function keepaliveSeconds(): number {
 export function followTerminalDirectory(): boolean {
     return vscode.workspace.getConfiguration(SECTION).get<boolean>('followTerminalDirectory', false);
 }
+
+/**
+ * Whether to ask the marketplace about the other release channel.
+ *
+ * @returns The user's current preference.
+ */
+export function suggestVersionChannel(): boolean {
+    return vscode.workspace.getConfiguration(SECTION).get<boolean>('suggestVersionChannel', true);
+}

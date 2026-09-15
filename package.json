@@ -241,6 +241,11 @@
           "default": false,
           "markdownDescription": "Move **Remote Files** to the folder the connection's terminal is in \u2014 the other direction of `#sshMultiConnect.followPathInTerminal#`. Both can be on at once; they will not chase each other.\n\n**When it is on:** every terminal opened from then on runs one setup line as it starts, which makes the shell report its folder before each prompt. You will see that line in the terminal, and the shell carries an extra function on `PROMPT_COMMAND` (bash) or in `precmd_functions` (zsh) until it exits. Terminals already open are not touched; reopen one to have it report.\n\n**What you get:** the tree follows any change the shell reports, including one made by a script, by `pushd`, or by a `cd` inside a command you ran, not only a `cd` you typed yourself.\n\n**Shells:** only bash and zsh can report. On dash, ash, fish, csh and anything else the setup line does nothing at all, silently, and the tree simply will not follow."
         },
+        "sshMultiConnect.suggestVersionChannel": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer to move between the release and pre-release versions of this extension when the other one has more to give.\n\n**When it is on:** at most once a day the marketplace is asked which versions exist. If you are on a pre-release and the stable release has caught up with it, you are offered the release; if you are on a release and a newer pre-release exists, you are offered that. Only this extension's identifier is sent, and a failure is silent.\n\nTurning down a particular version is remembered, so the same one is not offered twice."
+        },
         "sshMultiConnect.savePasswords": {
           "type": "boolean",
           "default": false,

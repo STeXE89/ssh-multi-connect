@@ -21,6 +21,7 @@ All notable changes to the "ssh-multi-connect" extension will be documented in t
 - **Download...** on a remote file or folder, saving it onto this machine.
 - **Keep This Tunnel** writes a running tunnel to `ssh_config`, so it opens on every connect.
 - **Remote Files** can follow the terminal's directory, the other direction of the existing setting.
+- An offer to move between the release and pre-release versions when the other channel has more to give.
 - Connections that drop are rebuilt on their own, reusing this session's credentials and reopening the tunnels that were running.
 - **Run Command on Hosts...** runs one command on several hosts and opens a report, grouping the hosts that agree.
 - The multi-command panel shows the selected hosts side by side in a split terminal group.
