@@ -11,3 +11,12 @@ const SECTION = 'sshMultiConnect';
 export function followPathInTerminal(): boolean {
     return vscode.workspace.getConfiguration(SECTION).get<boolean>('followPathInTerminal', false);
 }
+
+/**
+ * Whether the multi-command panel should open its own split terminal group.
+ *
+ * @returns The user's current preference.
+ */
+export function splitTerminalsForMultiCommand(): boolean {
+    return vscode.workspace.getConfiguration(SECTION).get<boolean>('splitTerminalsForMultiCommand', true);
+}

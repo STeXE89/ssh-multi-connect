@@ -14,6 +14,7 @@ This extension 'ssh-multi-connect' allows you to group SSH connections into fold
 - Inspect remote files and folders, and edit their permissions and ownership.
 - Create, rename and delete remote files and folders from the right-click menu.
 - Retry an operation with sudo when the remote user lacks permission.
+- Run one command across hosts and read the collected output in one report.
 - Reach hosts behind a bastion, with `ProxyJump`, set from the connection's right-click menu.
 - Connect from the command palette with **Connect to SSH Host...**.
 - Runs on Windows, macOS and Linux.
@@ -96,6 +97,12 @@ This extension contributes the following settings:
   terminal to the directory you select in **Remote Files**. Selecting a file uses its
   parent folder. The `cd` is typed into the terminal, so it can disturb a command that
   is already running there; it is only sent when the directory actually changes.
+
+* `sshMultiConnect.splitTerminalsForMultiCommand` (default `true`): send a
+  multi-host command to a split terminal group, one pane per selected host, so every
+  host's output is visible at once. These are terminals the panel opens itself, a
+  second shell on each connection; closing one does not disconnect the host. Turn it
+  off to send to each connection's own terminal instead.
 
 * `sshMultiConnect.savePasswords` (default `false`): keep the passwords you type in
   the operating system's keychain, so a host does not ask again. While it is off, a

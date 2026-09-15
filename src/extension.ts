@@ -18,6 +18,8 @@ import { countInFolder } from './utils/folders';
 import { TerminalPathFollower } from './terminalFollow';
 import { TunnelManager } from './tunnels';
 import { CredentialStore } from './credentials';
+import { CommandResultsDocuments, RESULTS_SCHEME } from './commandResultsDocument';
+import { runCommandOnHosts } from './multiCommandUi';
 import { SSHTunnelTreeItem } from './tunnelUi';
 import { followPathInTerminal } from './utils/settings';
 import { FileDetailsViewProvider } from './fileDetailsView';
@@ -41,7 +43,13 @@ export function activate(context: vscode.ExtensionContext) {
     sshViewProvider.setTunnelManager(tunnels);
     sshViewProvider.setCredentialStore(new CredentialStore(context.secrets));
 
-    registerCommands(context, sshViewProvider, tunnels);
+    const commandResults = new CommandResultsDocuments();
+    context.subscriptions.push(
+        commandResults,
+        vscode.workspace.registerTextDocumentContentProvider(RESULTS_SCHEME, commandResults)
+    );
+
+    registerCommands(context, sshViewProvider, tunnels, commandResults);
     monitorSSHConfigFile(context, sshViewProvider);
 
     registerTreeAndWebviewProviders(context, sshViewProvider);
@@ -181,7 +189,12 @@ function handleVisibleTextEditorsChange(editors: readonly vscode.TextEditor[], s
     }
 }
 
-function registerCommands(context: vscode.ExtensionContext, sshViewProvider: SSHViewProvider, tunnels: TunnelManager) {
+function registerCommands(
+    context: vscode.ExtensionContext,
+    sshViewProvider: SSHViewProvider,
+    tunnels: TunnelManager,
+    commandResults: CommandResultsDocuments
+) {
     const commands = [
         { command: 'sshMultiConnect.addConnection', callback: () => addSSHConnection(sshViewProvider) },
         { command: 'sshMultiConnect.quickConnect', callback: () => sshViewProvider.quickConnect() },
@@ -250,6 +263,19 @@ function registerCommands(context: vscode.ExtensionContext, sshViewProvider: SSH
         },
         { command: 'sshMultiConnect.refreshRemoteFiles', callback: () => refreshRemoteFiles(sshViewProvider) },
         { command: 'sshMultiConnect.openMultiCommandPanel', callback: () => sshViewProvider.openMultiCommandPanel() },
+        {
+            command: 'sshMultiConnect.runOnHosts',
+            callback: () =>
+                runCommandOnHosts(
+                    sshViewProvider.connections
+                        .filter(connection => connection.client)
+                        .map(connection => ({
+                            host: connection.user ? `${connection.user}@${connection.host}` : connection.host,
+                            client: connection.client!,
+                        })),
+                    commandResults
+                ),
+        },
         {
             command: 'sshMultiConnect.createRemoteFile',
             callback: (node: RemoteFileTreeItem) =>

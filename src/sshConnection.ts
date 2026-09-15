@@ -19,6 +19,8 @@ import {
     validateField,
 } from './utils/connectionEdit';
 import { accountLabel, hostPasswordPrompt } from './utils/authPrompts';
+import { missingTerminals, selectedTargets, splitTerminalName } from './utils/multiCommandTargets';
+import { splitTerminalsForMultiCommand } from './utils/settings';
 import { SSHTreeDecorationProvider, connectionResourceUri, folderResourceUri } from './connectionDecorations';
 import { RemoteFilesView } from './remoteFilesView';
 import { TerminalPathFollower } from './terminalFollow';
@@ -1428,6 +1430,9 @@ export class SSHFolderTreeItem extends vscode.TreeItem {
 export class MultiCommandPanel {
     private connections: ExtendedSSHConnection[];
     private terminals: Map<string, vscode.Terminal> = new Map();
+    /** The panel's own terminals, one per host, shown side by side. */
+    private readonly splitTerminals = new Map<string, vscode.Terminal>();
+    private readonly subscriptions: vscode.Disposable[] = [];
 
     constructor(
         private readonly view: vscode.WebviewView,
@@ -1450,6 +1455,18 @@ export class MultiCommandPanel {
                 this.updateWebview();
             }
         });
+
+        this.subscriptions.push(
+            vscode.window.onDidCloseTerminal(closed => {
+                for (const [id, terminal] of this.splitTerminals) {
+                    if (terminal === closed) {
+                        this.splitTerminals.delete(id);
+                    }
+                }
+            })
+        );
+
+        this.view.onDidDispose(() => this.subscriptions.forEach(subscription => subscription.dispose()));
 
         this.updateWebview();
     }
@@ -1483,19 +1500,24 @@ export class MultiCommandPanel {
     }
 
     private sendCommandToConnections(command: string, selectedConnectionIds: string[]) {
+        const selectedConnections = selectedTargets(this.connections, selectedConnectionIds);
+
+        if (selectedConnections.length === 0) {
+            vscode.window.showErrorMessage('No connections selected.');
+            return;
+        }
+
+        if (splitTerminalsForMultiCommand()) {
+            this.sendToSplitGroup(command, selectedConnections);
+            return;
+        }
+
         vscode.window.terminals.forEach(terminal => {
             const matchingConnection = this.connections.find(conn => terminal.name === `${conn.user}@${conn.host}`);
             if (matchingConnection) {
                 this.terminals.set(matchingConnection.id, terminal);
             }
         });
-
-        const selectedConnections = this.connections.filter(conn => selectedConnectionIds.includes(conn.id));
-
-        if (selectedConnections.length === 0) {
-            vscode.window.showErrorMessage('No connections selected.');
-            return;
-        }
 
         selectedConnections.forEach(connection => {
             const terminalName = `${connection.user}@${connection.host}`;
@@ -1506,5 +1528,59 @@ export class MultiCommandPanel {
                 vscode.window.showErrorMessage(`No existing terminal found for ${terminalName}`);
             }
         });
+    }
+
+    /**
+     * Runs the command in one split terminal group, a pane per host.
+     *
+     * VS Code can only put a terminal in a split group as it is created, so
+     * the group is made of terminals this panel opens rather than of the
+     * connections' own. Each is a second shell on the same SSH connection;
+     * closing one does not disconnect the host.
+     *
+     * @param command The command to run.
+     * @param connections The hosts to run it on.
+     */
+    private sendToSplitGroup(command: string, connections: ExtendedSSHConnection[]): void {
+        let parent = this.firstLiveSplitTerminal();
+        let opened: vscode.Terminal | undefined;
+
+        for (const connection of missingTerminals(connections, new Set(this.splitTerminals.keys()))) {
+            if (!connection.client) {
+                continue;
+            }
+
+            const terminal = vscode.window.createTerminal({
+                name: splitTerminalName(connection),
+                pty: new SSHPseudoterminal(connection.client),
+                // The first one starts the group; the rest split alongside it.
+                ...(parent ? { location: { parentTerminal: parent } } : {}),
+            });
+
+            this.splitTerminals.set(connection.id, terminal);
+            parent ??= terminal;
+            opened ??= terminal;
+        }
+
+        for (const connection of connections) {
+            this.splitTerminals.get(connection.id)?.sendText(command);
+        }
+
+        // Only a pane that was just opened is worth pulling the panel forward
+        // for. Sending again to a group that is already there leaves whatever
+        // you are looking at alone. preserveFocus keeps the command box's
+        // cursor either way.
+        opened?.show(true);
+    }
+
+    /** The terminal a new pane should split from, if the group is open. */
+    private firstLiveSplitTerminal(): vscode.Terminal | undefined {
+        for (const connection of this.connections) {
+            const terminal = this.splitTerminals.get(connection.id);
+            if (terminal) {
+                return terminal;
+            }
+        }
+        return undefined;
     }
 }

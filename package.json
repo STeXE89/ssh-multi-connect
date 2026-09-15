@@ -38,6 +38,12 @@
         "tooltip": "Discard the password saved for this host"
       },
       {
+        "command": "sshMultiConnect.runOnHosts",
+        "icon": "$(run-all)",
+        "title": "Run Command on Hosts...",
+        "tooltip": "Run one command on several hosts and collect the output"
+      },
+      {
         "command": "sshMultiConnect.quickConnect",
         "icon": "$(plug)",
         "title": "Connect to SSH Host...",
@@ -190,6 +196,11 @@
     "configuration": {
       "title": "SSH Multi Connect",
       "properties": {
+        "sshMultiConnect.splitTerminalsForMultiCommand": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Send a multi-host command to a split terminal group, one pane per selected host, so every host's output is visible at once.\n\nThese are terminals the panel opens itself, a second shell on each connection: VS Code can only place a terminal in a split group as it is created. Closing one does not disconnect the host.\n\nTurn this off to send the command to each connection's own terminal instead, as before."
+        },
         "sshMultiConnect.savePasswords": {
           "type": "boolean",
           "default": false,
