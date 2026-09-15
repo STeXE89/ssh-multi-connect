@@ -17,6 +17,7 @@ import { SSHTreeDecorationProvider } from './connectionDecorations';
 import { countInFolder } from './utils/folders';
 import { TerminalPathFollower } from './terminalFollow';
 import { TunnelManager } from './tunnels';
+import { CredentialStore } from './credentials';
 import { SSHTunnelTreeItem } from './tunnelUi';
 import { followPathInTerminal } from './utils/settings';
 import { FileDetailsViewProvider } from './fileDetailsView';
@@ -38,6 +39,7 @@ export function activate(context: vscode.ExtensionContext) {
         tunnels.onDidChange(() => sshViewProvider.refresh())
     );
     sshViewProvider.setTunnelManager(tunnels);
+    sshViewProvider.setCredentialStore(new CredentialStore(context.secrets));
 
     registerCommands(context, sshViewProvider, tunnels);
     monitorSSHConfigFile(context, sshViewProvider);
@@ -182,6 +184,11 @@ function handleVisibleTextEditorsChange(editors: readonly vscode.TextEditor[], s
 function registerCommands(context: vscode.ExtensionContext, sshViewProvider: SSHViewProvider, tunnels: TunnelManager) {
     const commands = [
         { command: 'sshMultiConnect.addConnection', callback: () => addSSHConnection(sshViewProvider) },
+        { command: 'sshMultiConnect.quickConnect', callback: () => sshViewProvider.quickConnect() },
+        {
+            command: 'sshMultiConnect.forgetPassword',
+            callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.forgetPassword(treeItem),
+        },
         {
             command: 'sshMultiConnect.connect',
             callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.connect(treeItem),
@@ -189,6 +196,10 @@ function registerCommands(context: vscode.ExtensionContext, sshViewProvider: SSH
         {
             command: 'sshMultiConnect.disconnect',
             callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.disconnect(treeItem),
+        },
+        {
+            command: 'sshMultiConnect.editConnection',
+            callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.editConnection(treeItem),
         },
         {
             command: 'sshMultiConnect.removeConnection',

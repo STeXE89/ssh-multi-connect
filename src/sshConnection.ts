@@ -8,7 +8,17 @@ import {
 } from './constants/globals';
 import * as fileUtils from './utils/fileUtils';
 import { SSHPseudoterminal } from './sshTerminal';
-import { connectionTuning, agentAddress } from './utils/connectOptions';
+import { connectionTuning, agentAddress, isAuthFailure } from './utils/connectOptions';
+import { CredentialStore } from './credentials';
+import {
+    EditableField,
+    FieldDescriptor,
+    applyEdit,
+    editableFields,
+    isRename,
+    validateField,
+} from './utils/connectionEdit';
+import { accountLabel, hostPasswordPrompt } from './utils/authPrompts';
 import { SSHTreeDecorationProvider, connectionResourceUri, folderResourceUri } from './connectionDecorations';
 import { RemoteFilesView } from './remoteFilesView';
 import { TerminalPathFollower } from './terminalFollow';
@@ -73,6 +83,17 @@ export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
             placeHolder: `Port (default ${SSH_DEFAULT_PORT})`,
             value: SSH_DEFAULT_PORT.toString(),
         });
+        // Optional, and asked before the key ritual so a plain host is not
+        // held up by a question it does not need answered.
+        const proxyJump = await vscode.window.showInputBox({
+            placeHolder: 'Jump host, or several separated by commas (optional)',
+            prompt: 'Leave empty to connect directly. For example jump@bastion:2222',
+            validateInput: text => validateField('proxyJump', text),
+        });
+        if (proxyJump === undefined) {
+            return;
+        }
+
         const usePrivateKey = await vscode.window.showQuickPick(['Yes', 'No'], {
             placeHolder: 'Use SSH Key?',
         });
@@ -128,6 +149,7 @@ export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
             hostname,
             user,
             port: port ? parseInt(port) : SSH_DEFAULT_PORT,
+            proxyJump: proxyJump.trim() || undefined,
             identityFile: usePrivateKey === 'Yes' ? identityFile : undefined,
         };
 
@@ -137,12 +159,8 @@ export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
 
         sshViewProvider.connections.push({
             id: host,
-            host,
-            hostname,
-            user,
-            port: port ? parseInt(port) : SSH_DEFAULT_PORT,
+            ...newConnection,
             usePrivateKey: usePrivateKey === 'Yes',
-            identityFile: usePrivateKey === 'Yes' ? identityFile : undefined,
         });
 
         const uniqueConnections = sshViewProvider.connections.filter(
@@ -207,6 +225,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
     private remoteFilesView?: RemoteFilesView;
     private pathFollower?: TerminalPathFollower;
     private tunnels?: TunnelManager;
+    private credentials?: CredentialStore;
 
     // activate() owns the tree view and the terminal-close listener.
     constructor(_context: vscode.ExtensionContext) {
@@ -317,6 +336,9 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
                         id: conn.host,
                         usePrivateKey: !!conn.identityFile,
                         client: previous?.client,
+                        // Without this a reload would strand the bastion
+                        // chain, leaving it open after the host disconnects.
+                        jump: previous?.jump,
                         password: previous?.password,
                         passphrase: previous?.passphrase,
                         privateKey: previous?.privateKey,
@@ -387,6 +409,103 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         return this.terminals.get(connectionId);
     }
 
+    /**
+     * Lets the user change a connection's settings.
+     *
+     * The picker stays open after each change, since correcting one setting
+     * usually means looking at the others, and closes on Escape.
+     *
+     * @param treeItem The connection to edit.
+     */
+    public async editConnection(treeItem: SSHConnectionTreeItem): Promise<void> {
+        let connection = this.connections.find(conn => conn.host === treeItem.connection.host) ?? treeItem.connection;
+
+        for (;;) {
+            const rows: (vscode.QuickPickItem & { descriptor?: FieldDescriptor })[] = [
+                ...editableFields(connection).map(descriptor => ({
+                    label: descriptor.label,
+                    description: descriptor.value,
+                    descriptor,
+                })),
+                { label: '', kind: vscode.QuickPickItemKind.Separator },
+                { label: '$(check) Done', description: 'Close the editor' },
+            ];
+
+            const picked = await vscode.window.showQuickPick(rows, {
+                placeHolder: `Edit ${connection.host}`,
+                matchOnDescription: true,
+            });
+
+            // Escape and Done both mean the same thing; Done is there because
+            // a list that only closes on Escape does not look finishable.
+            if (!picked?.descriptor) {
+                return;
+            }
+
+            const { descriptor } = picked;
+            const value = await vscode.window.showInputBox({
+                value: descriptor.current,
+                prompt: descriptor.prompt,
+                validateInput: text => validateField(descriptor.field, text),
+            });
+
+            if (value === undefined) {
+                continue;
+            }
+
+            const edited = this.saveEdit(connection, descriptor.field, value);
+            if (!edited) {
+                return;
+            }
+
+            connection = edited;
+        }
+    }
+
+    /**
+     * Writes one edited setting to ssh_config.
+     *
+     * @param connection The connection before the edit.
+     * @param field The setting that changed.
+     * @param value The new value.
+     * @returns The saved connection, or undefined when the edit was refused.
+     */
+    private saveEdit(
+        connection: ExtendedSSHConnection,
+        field: EditableField,
+        value: string
+    ): ExtendedSSHConnection | undefined {
+        const edited: ExtendedSSHConnection = { ...connection, ...applyEdit(connection, field, value) };
+
+        if (isRename(connection, edited)) {
+            if (connection.client) {
+                vscode.window.showErrorMessage(
+                    `Disconnect from ${connection.host} before renaming it: its terminal and files are tracked by name.`
+                );
+                return undefined;
+            }
+
+            if (this.connections.some(conn => conn.host === edited.host)) {
+                vscode.window.showErrorMessage(`A connection named "${edited.host}" already exists.`);
+                return undefined;
+            }
+
+            removeConnection(connection.host);
+            edited.id = edited.host;
+        }
+
+        insertOrUpdateConnection(edited);
+        this.loadSSHConnections();
+        this.rebindProvider(edited.host);
+        this.refresh();
+
+        if (connection.client) {
+            vscode.window.showInformationMessage(`${edited.host} updated. Reconnect for the change to take effect.`);
+        }
+
+        return this.connections.find(conn => conn.host === edited.host) ?? edited;
+    }
+
     public removeConnection(treeItem: SSHConnectionTreeItem) {
         const connection = treeItem.connection;
 
@@ -402,6 +521,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             }
 
             removeConnection(connection.host);
+            void this.credentials?.forget(connection);
 
             this.connections = this.connections.filter(conn => conn.host !== connection.host);
             RemoteFileProvider.removeProviderByConnectionId(connection.id);
@@ -639,7 +759,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             plan.hops,
             { host: connection.hostname, port: connection.port ?? SSH_DEFAULT_PORT },
             resolveHost,
-            createAuthProvider(),
+            createAuthProvider(connection.host),
             createKeyApprover()
         );
 
@@ -695,13 +815,39 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             return;
         }
 
-        const password = await vscode.window.showInputBox({ placeHolder: 'Password', password: true });
+        const saved = await this.credentials?.read(connection);
+        if (saved) {
+            connection.password = saved;
+            try {
+                await this.connectWithPassword(connection, treeItem, saved);
+                return;
+            } catch (error) {
+                if (!isAuthFailure(error)) {
+                    throw error;
+                }
+                // The client and any jump chain are spent, so the retry is the
+                // user's next attempt rather than one made here.
+                await this.credentials?.forget(connection);
+                throw new Error('The saved password was rejected and has been discarded. Connect again to enter it.');
+            }
+        }
+
+        const password = await vscode.window.showInputBox({
+            ...hostPasswordPrompt(
+                accountLabel(connection.user ?? '', connection.hostname, connection.port ?? SSH_DEFAULT_PORT),
+                connection.host,
+                connection.jump?.description
+            ),
+            password: true,
+            ignoreFocusOut: true,
+        });
         if (!password) {
             throw new Error('Connection cancelled. No password provided.');
         }
 
         connection.password = password;
         await this.connectWithPassword(connection, treeItem, password);
+        await this.credentials?.save(connection, password);
     }
 
     public disconnect(treeItem: SSHConnectionTreeItem) {
@@ -888,8 +1034,11 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         const firstParse = utils.parseKey(privateKey, passphrase);
         if (firstParse instanceof Error && /encrypted|passphrase/i.test(firstParse.message)) {
             passphrase = await vscode.window.showInputBox({
-                placeHolder: 'Passphrase for private key',
+                title: connection.jump ? `Destination: ${connection.host}` : undefined,
+                placeHolder: `Passphrase for ${identityFile}`,
+                prompt: connection.jump ? `Reached through ${connection.jump.description}` : connection.host,
                 password: true,
+                ignoreFocusOut: true,
             });
 
             if (!passphrase) {
@@ -964,6 +1113,20 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
 
     public setTunnelManager(manager: TunnelManager): void {
         this.tunnels = manager;
+    }
+
+    public setCredentialStore(store: CredentialStore): void {
+        this.credentials = store;
+    }
+
+    /**
+     * Discards a connection's saved password.
+     *
+     * @param treeItem The connection to forget.
+     */
+    public async forgetPassword(treeItem: SSHConnectionTreeItem): Promise<void> {
+        await this.credentials?.forget(treeItem.connection);
+        vscode.window.showInformationMessage(`Any saved password for ${treeItem.connection.host} has been discarded.`);
     }
 
     /**
@@ -1055,6 +1218,42 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         );
     }
 
+    /**
+     * Offers every known host in a quick pick, and connects to the one chosen.
+     *
+     * A host that is already connected gets its terminal shown instead of a
+     * second connection.
+     */
+    public async quickConnect(): Promise<void> {
+        this.loadSSHConnections();
+
+        if (this.connections.length === 0) {
+            vscode.window.showInformationMessage('No SSH connections are configured yet.');
+            return;
+        }
+
+        const picked = await vscode.window.showQuickPick(connectionPicks(this.connections), {
+            placeHolder: 'Connect to...',
+            matchOnDescription: true,
+            matchOnDetail: true,
+        });
+
+        const connection = picked?.connection;
+        if (!connection) {
+            return;
+        }
+
+        const treeItem = this.createConnectionItem(connection);
+
+        if (connection.client) {
+            this.terminals.get(connection.id)?.show();
+            this.selectConnection(treeItem);
+            return;
+        }
+
+        await this.connect(treeItem);
+    }
+
     public refresh(): void {
         this._onDidChangeTreeData.fire();
         this.decorationProvider?.refresh();
@@ -1096,6 +1295,40 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
 export function describeTarget(connection: ExtendedSSHConnection): string | undefined {
     const target = connection.user ? `${connection.user}@${connection.hostname}` : connection.hostname;
     return target && target !== connection.host ? target : undefined;
+}
+
+/** An entry in the "Connect to..." list: a connection, or a group heading. */
+export interface ConnectionPick extends vscode.QuickPickItem {
+    /** Absent on the separators, which cannot be picked. */
+    connection?: ExtendedSSHConnection;
+}
+
+/**
+ * Builds the "Connect to..." list.
+ *
+ * Live connections come first, so the list doubles as a way back to a terminal
+ * that is already open. The folder is the detail line rather than part of the
+ * label, so typing a host name still matches it.
+ *
+ * @param connections The known connections.
+ * @returns The items to offer, live ones first and alphabetical within each group.
+ */
+export function connectionPicks(connections: ExtendedSSHConnection[]): ConnectionPick[] {
+    const byName = [...connections].sort((a, b) => a.host.localeCompare(b.host));
+    const live = byName.filter(connection => connection.client);
+    const idle = byName.filter(connection => !connection.client);
+
+    const pick = (connection: ExtendedSSHConnection): ConnectionPick => ({
+        label: `$(${connection.client ? 'vm-active' : 'vm-outline'}) ${connection.host}`,
+        description: describeTarget(connection),
+        detail: connection.vFolderTag ? `$(folder) ${connection.vFolderTag}` : undefined,
+        connection,
+    });
+
+    const group = (items: ExtendedSSHConnection[], label: string): ConnectionPick[] =>
+        items.length === 0 ? [] : [{ label, kind: vscode.QuickPickItemKind.Separator }, ...items.map(pick)];
+
+    return [...group(live, 'Connected'), ...group(idle, 'Not connected')];
 }
 
 /**

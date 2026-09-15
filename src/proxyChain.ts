@@ -31,8 +31,15 @@ export interface HopAuth {
     password?: string;
 }
 
+/** Where a hop sits in the chain, so a prompt can say which one is asking. */
+export interface HopPosition {
+    /** Counting from zero. */
+    index: number;
+    total: number;
+}
+
 /** Supplies credentials for a hop, prompting the user where needed. */
-export type AuthProvider = (hop: JumpHop, target: HopTarget) => Promise<HopAuth>;
+export type AuthProvider = (hop: JumpHop, target: HopTarget, position: HopPosition) => Promise<HopAuth>;
 
 /** Decides whether a hop's host key is acceptable, and records it. */
 export type KeyApprover = (target: HopTarget, key: Buffer) => Promise<boolean>;
@@ -94,7 +101,7 @@ export async function openJumpChain(
 
         for (const [index, hop] of hops.entries()) {
             const target = resolveHop(hop, resolve);
-            const credentials = await auth(hop, target);
+            const credentials = await auth(hop, target, { index, total: hops.length });
 
             const client = new Client();
             clients.push(client);

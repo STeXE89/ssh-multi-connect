@@ -14,6 +14,8 @@ This extension 'ssh-multi-connect' allows you to group SSH connections into fold
 - Inspect remote files and folders, and edit their permissions and ownership.
 - Create, rename and delete remote files and folders from the right-click menu.
 - Retry an operation with sudo when the remote user lacks permission.
+- Reach hosts behind a bastion, with `ProxyJump`, set from the connection's right-click menu.
+- Connect from the command palette with **Connect to SSH Host...**.
 - Runs on Windows, macOS and Linux.
 
 ## Requirements
@@ -65,7 +67,11 @@ Host db
   ProxyJump jump@bastion.example.com
 ```
 
-Each hop is a real SSH connection carried inside the previous one, so no
+Set it when adding a connection, with **Edit Connection...** on an existing
+one, or by writing it in `~/.ssh/config` directly. Connecting then asks for
+each hop's credentials in turn, and every prompt names the account it is for
+and where the chain is going, so the jump host cannot be mistaken for the
+destination. Each hop is a real SSH connection carried inside the previous one, so no
 external `ssh` process is involved. Chains of several hops work, and each hop
 can have its own `Host` block for its user, port and key. Because a jumped host
 cannot be reached by `ssh-keyscan`, its host key is checked during the
@@ -90,6 +96,11 @@ This extension contributes the following settings:
   terminal to the directory you select in **Remote Files**. Selecting a file uses its
   parent folder. The `cd` is typed into the terminal, so it can disturb a command that
   is already running there; it is only sent when the directory actually changes.
+
+* `sshMultiConnect.savePasswords` (default `false`): keep the passwords you type in
+  the operating system's keychain, so a host does not ask again. While it is off, a
+  password is only held in memory for the life of the connection. **Forget Saved
+  Password** on a connection discards one.
 
 ## Known Issues
 

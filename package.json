@@ -32,6 +32,18 @@
         "tooltip": "Add SSH Connection"
       },
       {
+        "command": "sshMultiConnect.forgetPassword",
+        "icon": "$(key)",
+        "title": "Forget Saved Password",
+        "tooltip": "Discard the password saved for this host"
+      },
+      {
+        "command": "sshMultiConnect.quickConnect",
+        "icon": "$(plug)",
+        "title": "Connect to SSH Host...",
+        "tooltip": "Pick an SSH connection to open"
+      },
+      {
         "command": "sshMultiConnect.connect",
         "icon": "$(terminal)",
         "title": "Connect to SSH",
@@ -42,6 +54,12 @@
         "icon": "$(stop)",
         "title": "Disconnect from SSH",
         "tooltip": "Disconnect from SSH"
+      },
+      {
+        "command": "sshMultiConnect.editConnection",
+        "icon": "$(edit)",
+        "title": "Edit Connection...",
+        "tooltip": "Change this connection's address, user, port, jump hosts or key"
       },
       {
         "command": "sshMultiConnect.removeConnection",
@@ -172,6 +190,11 @@
     "configuration": {
       "title": "SSH Multi Connect",
       "properties": {
+        "sshMultiConnect.savePasswords": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Keep the passwords you type in the operating system's keychain, so a host does not ask again.\n\nOff by default: while it is off, a password is only held in memory for the life of the connection. Use **Forget Saved Password** on a connection to discard one."
+        },
         "sshMultiConnect.followPathInTerminal": {
           "type": "boolean",
           "default": false,
@@ -209,6 +232,11 @@
           "group": "inline"
         },
         {
+          "command": "sshMultiConnect.editConnection",
+          "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
+          "group": "1_edit@0"
+        },
+        {
           "command": "sshMultiConnect.removeConnection",
           "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
           "group": "inline"
@@ -217,6 +245,10 @@
           "command": "sshMultiConnect.moveToFolder",
           "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
           "group": "inline"
+        },
+        {
+          "command": "sshMultiConnect.forgetPassword",
+          "when": "config.sshMultiConnect.savePasswords && (viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected)"
         },
         {
           "command": "sshMultiConnect.createRemoteFile",
@@ -269,11 +301,6 @@
           "group": "inline@0"
         },
         {
-          "command": "sshMultiConnect.addTunnel",
-          "when": "viewItem == sshConnectionConnected",
-          "group": "5_tunnel@1"
-        },
-        {
           "command": "sshMultiConnect.startTunnel",
           "when": "viewItem == sshTunnelDown",
           "group": "inline@1"
@@ -317,11 +344,19 @@
           "when": "false"
         },
         {
+          "command": "sshMultiConnect.forgetPassword",
+          "when": "false"
+        },
+        {
           "command": "sshMultiConnect.disconnect",
           "when": "false"
         },
         {
           "command": "sshMultiConnect.removeConnection",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.editConnection",
           "when": "false"
         },
         {

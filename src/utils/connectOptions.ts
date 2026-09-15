@@ -68,3 +68,22 @@ export function connectionTuning(connection: SSHConnection, agent: string | unde
 
     return tuning;
 }
+
+/**
+ * Reports whether a failed connection failed because the credentials were
+ * wrong, rather than because the host could not be reached.
+ *
+ * ssh2 tags authentication failures, but a jump host's error arrives already
+ * wrapped in a message, so the text is checked too.
+ *
+ * @param error The error a connection attempt threw.
+ * @returns True when the credentials were rejected.
+ */
+export function isAuthFailure(error: unknown): boolean {
+    if ((error as { level?: string })?.level === 'client-authentication') {
+        return true;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return /authentication method|permission denied|authentication failed/i.test(message);
+}

@@ -249,6 +249,38 @@ suite('proxyChain: opening a chain', () => {
         await hop.close();
     });
 
+    test('tells the credential prompt which hop is asking', async () => {
+        const first = await bastion();
+        const second = await bastion();
+        const target = await bastion();
+        const asked: string[] = [];
+
+        const blocks: Record<string, SSHConnection> = {
+            first: { host: 'first', hostname: '127.0.0.1', port: first.port },
+            second: { host: 'second', hostname: '127.0.0.1', port: second.port },
+        };
+
+        const chain = await openJumpChain(
+            [{ host: 'first' }, { host: 'second' }],
+            { host: '127.0.0.1', port: target.port },
+            alias => blocks[alias] ?? null,
+            async (hop, _target, position) => {
+                asked.push(`${hop.host} ${position.index + 1}/${position.total}`);
+                return { password: 'unused-by-the-test-server' };
+            },
+            acceptKey
+        );
+
+        try {
+            assert.deepStrictEqual(asked, ['first 1/2', 'second 2/2']);
+        } finally {
+            chain.dispose();
+            await first.close();
+            await second.close();
+            await target.close();
+        }
+    });
+
     test('rejects an empty chain rather than connecting directly', async () => {
         await assert.rejects(
             openJumpChain([], { host: 'h', port: 22 }, noConfig, anyPassword, acceptKey),

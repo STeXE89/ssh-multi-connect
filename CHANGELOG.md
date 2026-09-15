@@ -9,6 +9,10 @@ All notable changes to the "ssh-multi-connect" extension will be documented in t
 - Hosts behind a bastion, through `ProxyJump` and the `ProxyCommand` forms that mean the same thing.
 - `LocalForward` and `RemoteForward` entries open as tunnels on connect.
 - `ServerAliveInterval`, `ServerAliveCountMax`, `Compression` and `ForwardAgent` are honoured.
+- **Connect to SSH Host...** in the command palette, listing every host with the live ones first.
+- **Edit Connection...** on a host, for its address, user, port, jump hosts and key.
+- Jump hosts can be set when adding a connection, and each credential prompt names the host asking.
+- Optional password storage in the operating system's keychain, off by default.
 
 ## [0.0.9] - 2026/09/09
 

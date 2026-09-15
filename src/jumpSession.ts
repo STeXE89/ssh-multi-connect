@@ -9,12 +9,13 @@
 
 import * as vscode from 'vscode';
 import { utils } from 'ssh2';
-import { AuthProvider, HopTarget, KeyApprover, HostResolver } from './proxyChain';
+import { AuthProvider, HopPosition, HopTarget, KeyApprover, HostResolver } from './proxyChain';
 import { JumpHop, parseProxyJump, proxyJumpFromCommand } from './utils/proxyJump';
 import { SSHConnection } from './utils/sshConfig';
 import { fingerprintOfKey } from './utils/hostKeys';
 import { getConnection, isKnownHost, removeKnownHost, rememberHostKey } from './utils/sshUtils';
 import { readFile } from './utils/fileUtils';
+import { accountLabel, hopPasswordPrompt, hopPassphrasePrompt } from './utils/authPrompts';
 
 /** What a host's config asks for in front of it. */
 export type JumpPlan =
@@ -64,30 +65,32 @@ export const resolveHost: HostResolver = alias => getConnection(alias);
  * the user types is kept for the life of the chain so a repeated hop is only
  * asked about once.
  *
+ * @param destination The host the chain is on the way to, named in the prompts
+ * so it is clear that a bastion, not the destination, is asking.
  * @returns An auth provider for `openJumpChain`.
  */
-export function createAuthProvider(): AuthProvider {
+export function createAuthProvider(destination: string): AuthProvider {
     const answered = new Map<string, { privateKey?: Buffer; passphrase?: string; password?: string }>();
 
-    return async (hop: JumpHop, target: HopTarget) => {
-        const cacheKey = `${target.username}@${target.host}:${target.port}`;
-        const cached = answered.get(cacheKey);
+    return async (hop: JumpHop, target: HopTarget, position: HopPosition) => {
+        const account = accountLabel(target.username, target.host, target.port);
+        const cached = answered.get(account);
         if (cached) {
             return cached;
         }
 
         const configured = getConnection(hop.host);
         const credentials = configured?.identityFile
-            ? await keyCredentials(configured.identityFile, cacheKey)
-            : await passwordCredentials(cacheKey);
+            ? await keyCredentials(configured.identityFile, account, position, destination)
+            : await passwordCredentials(account, position, destination);
 
-        answered.set(cacheKey, credentials);
+        answered.set(account, credentials);
         return credentials;
     };
 }
 
 /** Loads a hop's private key, asking for a passphrase when it is encrypted. */
-async function keyCredentials(identityFile: string, label: string) {
+async function keyCredentials(identityFile: string, label: string, position: HopPosition, destination: string) {
     let privateKey: Buffer;
     try {
         privateKey = Buffer.from(readFile(identityFile));
@@ -105,9 +108,9 @@ async function keyCredentials(identityFile: string, label: string) {
     }
 
     const passphrase = await vscode.window.showInputBox({
-        placeHolder: `Passphrase for ${identityFile}`,
-        prompt: `Jump host ${label}`,
+        ...hopPassphrasePrompt(label, identityFile, position.index, position.total, destination),
         password: true,
+        ignoreFocusOut: true,
     });
 
     if (!passphrase) {
@@ -118,11 +121,11 @@ async function keyCredentials(identityFile: string, label: string) {
 }
 
 /** Asks for a hop's password. */
-async function passwordCredentials(label: string) {
+async function passwordCredentials(label: string, position: HopPosition, destination: string) {
     const password = await vscode.window.showInputBox({
-        placeHolder: `Password for ${label}`,
-        prompt: 'Jump host',
+        ...hopPasswordPrompt(label, position.index, position.total, destination),
         password: true,
+        ignoreFocusOut: true,
     });
 
     if (!password) {
