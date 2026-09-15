@@ -34,7 +34,7 @@ export function parseProxyJump(value: string): JumpHop[] | undefined {
 
     const hops: JumpHop[] = [];
     for (const piece of trimmed.split(',')) {
-        const hop = parseHop(piece.trim());
+        const hop = parseHostSpec(piece.trim());
         if (!hop) {
             return undefined;
         }
@@ -45,12 +45,15 @@ export function parseProxyJump(value: string): JumpHop[] | undefined {
 }
 
 /**
- * Parses one `[user@]host[:port]` hop.
+ * Parses a `[user@]host[:port]` specification.
  *
- * @param spec The hop text.
- * @returns The hop, or undefined when it is malformed.
+ * The same shape a jump hop takes, and the same shape a host typed into a
+ * prompt takes, so both are read here.
+ *
+ * @param spec The text.
+ * @returns The host, or undefined when it is malformed.
  */
-function parseHop(spec: string): JumpHop | undefined {
+export function parseHostSpec(spec: string): JumpHop | undefined {
     if (!spec) {
         return undefined;
     }

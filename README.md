@@ -15,6 +15,11 @@ This extension 'ssh-multi-connect' allows you to group SSH connections into fold
 - Create, rename and delete remote files and folders from the right-click menu.
 - Retry an operation with sudo when the remote user lacks permission.
 - Run one command across hosts and read the collected output in one report.
+- Upload files and folders by dragging them onto the remote tree, or by picking them.
+- Move remote files and folders by dragging them within the tree.
+- Select several remote entries to move, copy, download, or delete them together.
+- Copy a file or folder from one host to one or more others, connecting them if needed.
+- Download a remote file or folder onto this machine.
 - Keep a tunnel in `ssh_config` so it opens on every connect.
 - Reach hosts behind a bastion, with `ProxyJump`, set from the connection's right-click menu.
 - Connect from the command palette with **Connect to SSH Host...**.

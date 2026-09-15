@@ -13,6 +13,12 @@ All notable changes to the "ssh-multi-connect" extension will be documented in t
 - **Edit Connection...** on a host, for its address, user, port, jump hosts and key.
 - Jump hosts can be set when adding a connection, and each credential prompt names the host asking.
 - Optional password storage in the operating system's keychain, off by default.
+- Drag files and folders from the desktop or the explorer onto **Remote Files** to upload them.
+- **Copy to Host...** on a remote file or folder, copying it to one or more other hosts.
+- **Upload...** on a remote folder, or in the **Remote Files** title bar, picking local files or a folder to send.
+- Dragging a remote file or folder onto another folder moves it.
+- Several remote entries can be selected at once, to move, copy, download or delete together; the File Details panel shows how many and how much.
+- **Download...** on a remote file or folder, saving it onto this machine.
 - **Keep This Tunnel** writes a running tunnel to `ssh_config`, so it opens on every connect.
 - Connections that drop are rebuilt on their own, reusing this session's credentials and reopening the tunnels that were running.
 - **Run Command on Hosts...** runs one command on several hosts and opens a report, grouping the hosts that agree.
@@ -22,6 +28,8 @@ All notable changes to the "ssh-multi-connect" extension will be documented in t
 
 - `IdentityFile ~/.ssh/id_ed25519` failed, because a leading `~` was never expanded.
 - Hosts defined in files pulled in with `Include` were invisible.
+- Disconnecting a host left its remote file list on screen when another host was selected.
+- Creating a remote file or folder where the user lacks permission reported the error without offering sudo, unlike every other file operation.
 - A connection killed by suspending the machine stayed in the tree looking live, since nothing probed it and nothing watched for it closing.
 
 ## [0.0.9] - 2026/09/09

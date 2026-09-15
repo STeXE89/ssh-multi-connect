@@ -19,6 +19,7 @@ import {
     validateField,
 } from './utils/connectionEdit';
 import { accountLabel, hostPasswordPrompt } from './utils/authPrompts';
+import { RemoteViewAction, remoteViewAfterDisconnect } from './utils/viewState';
 import { missingTerminals, selectedTargets, splitTerminalName } from './utils/multiCommandTargets';
 import { splitTerminalsForMultiCommand, autoReconnect, keepaliveSeconds } from './utils/settings';
 import { backoffDelays, canReconnectSilently, describeAttempt } from './utils/reconnect';
@@ -550,6 +551,33 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         }
     }
 
+    /**
+     * Moves the remote file view where a disconnect left it.
+     *
+     * @param decision What the view should do.
+     */
+    private applyRemoteViewAction(decision: RemoteViewAction): void {
+        if (decision.action === 'keep') {
+            return;
+        }
+
+        if (decision.action === 'clear') {
+            this.clearRemoteFileView();
+            return;
+        }
+
+        const next = this.connections.find(conn => conn.id === decision.connectionId);
+        if (!next) {
+            this.clearRemoteFileView();
+            return;
+        }
+
+        this.selectedConnection = next;
+        const provider = RemoteFileProvider.createOrGetProvider(next, '/');
+        this.remoteFilesView?.setProvider(provider);
+        provider.refresh();
+    }
+
     /** Resets the remote file view to its empty state. */
     private clearRemoteFileView(): void {
         this.selectedConnection = undefined;
@@ -898,20 +926,20 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         this.pathFollower?.forget(connection.id);
         void this.tunnels?.disposeConnection(connection.id);
 
-        const remoteFileProvider = RemoteFileProvider.getProviderByConnectionId(connection.id);
-        if (remoteFileProvider) {
-            remoteFileProvider.cleanup();
-        }
+        // Read before cleanup, which unregisters the provider.
+        const showing = this.remoteFilesView?.provider;
+        const showingId = showing instanceof RemoteFileProvider ? showing.connectionId : undefined;
 
-        if (this.selectedConnection && this.selectedConnection.id === connection.id) {
-            this.selectedConnection = this.connections.find(conn => conn.client);
+        RemoteFileProvider.getProviderByConnectionId(connection.id)?.cleanup();
 
-            if (this.selectedConnection) {
-                const newRemoteFileProvider = RemoteFileProvider.createOrGetProvider(this.selectedConnection, '/');
-                this.remoteFilesView?.setProvider(newRemoteFileProvider);
-                newRemoteFileProvider.refresh();
-            }
-        }
+        this.applyRemoteViewAction(
+            remoteViewAfterDisconnect(
+                connection.id,
+                showingId,
+                this.selectedConnection?.id,
+                this.connections.filter(conn => conn.client).map(conn => conn.id)
+            )
+        );
 
         if (this.multiCommandPanel) {
             const connectedConnections = this.connections.filter(conn => conn.client);
@@ -1271,6 +1299,12 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         vscode.commands.executeCommand('setContext', 'sshConnectionActive', true);
     }
 
+    /** The connection whose files the remote tree is showing, if any. */
+    public get activeRemoteConnectionId(): string | undefined {
+        return (this.selectedConnection?.client ? this.selectedConnection : this.connections.find(conn => conn.client))
+            ?.id;
+    }
+
     public getRemoteFileProvider(connectionId: string): RemoteFileProvider | undefined {
         return RemoteFileProvider.getProviderByConnectionId(connectionId);
     }
@@ -1407,6 +1441,60 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
      * A host that is already connected gets its terminal shown instead of a
      * second connection.
      */
+    /**
+     * Connects a host if it is not already, for a task that needs it live.
+     *
+     * @param connection The host to connect.
+     * @returns The connection once it is live, or undefined when it failed.
+     */
+    public async ensureConnected(connection: ExtendedSSHConnection): Promise<ExtendedSSHConnection | undefined> {
+        if (connection.client) {
+            return connection;
+        }
+
+        await this.connect(this.createConnectionItem(connection));
+
+        // connect() reports its own failures; the caller only needs to know
+        // whether there is a connection to work with.
+        return this.connections.find(conn => conn.id === connection.id && conn.client);
+    }
+
+    /**
+     * Adds a host that was typed in rather than picked, and connects it.
+     *
+     * It is saved to ssh_config like any other: a host worth copying to once
+     * is usually worth having in the list.
+     *
+     * @param spec The host, user and port.
+     * @returns The connection once it is live, or undefined when it failed.
+     */
+    public async addAndConnect(spec: {
+        host: string;
+        user?: string;
+        port?: number;
+    }): Promise<ExtendedSSHConnection | undefined> {
+        const existing = this.connections.find(conn => conn.host === spec.host);
+        if (existing) {
+            return this.ensureConnected(existing);
+        }
+
+        insertOrUpdateConnection({
+            host: spec.host,
+            hostname: spec.host,
+            user: spec.user,
+            port: spec.port ?? SSH_DEFAULT_PORT,
+        });
+        this.loadSSHConnections();
+
+        const added = this.connections.find(conn => conn.host === spec.host);
+        if (!added) {
+            vscode.window.showErrorMessage(`Could not add "${spec.host}" to the connection list.`);
+            return undefined;
+        }
+
+        return this.ensureConnected(added);
+    }
+
     public async quickConnect(): Promise<void> {
         this.loadSSHConnections();
 

@@ -204,6 +204,8 @@ export const sudoCommands = {
     chmod: (remotePath: string, mode: string) => `chmod ${quote(mode)} -- ${quote(remotePath)}`,
     chown: (remotePath: string, owner: string, group: string) =>
         `chown ${quote(`${owner}:${group}`)} -- ${quote(remotePath)}`,
+    mkdir: (remotePath: string) => `mkdir -- ${quote(remotePath)}`,
+    touch: (remotePath: string) => `touch -- ${quote(remotePath)}`,
     read: (remotePath: string) => `cat -- ${quote(remotePath)}`,
     write: (remotePath: string) => `cat > ${quote(remotePath)}`,
 };

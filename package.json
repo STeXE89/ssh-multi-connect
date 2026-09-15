@@ -122,6 +122,24 @@
         "tooltip": "Delete"
       },
       {
+        "command": "sshMultiConnect.uploadToRemote",
+        "icon": "$(cloud-upload)",
+        "title": "Upload...",
+        "tooltip": "Send local files or a folder to this folder"
+      },
+      {
+        "command": "sshMultiConnect.downloadRemote",
+        "icon": "$(cloud-download)",
+        "title": "Download...",
+        "tooltip": "Save this file or folder onto this machine"
+      },
+      {
+        "command": "sshMultiConnect.copyToHost",
+        "icon": "$(arrow-swap)",
+        "title": "Copy to Host...",
+        "tooltip": "Copy this file or folder to another connected host"
+      },
+      {
         "command": "sshMultiConnect.copyRemotePath",
         "icon": "$(clippy)",
         "title": "Copy Path",
@@ -238,6 +256,11 @@
           "group": "navigation"
         },
         {
+          "command": "sshMultiConnect.uploadToRemote",
+          "when": "view == remoteFilesView && sshConnectionActive",
+          "group": "navigation@0"
+        },
+        {
           "command": "sshMultiConnect.refreshRemoteFiles",
           "when": "view == remoteFilesView",
           "group": "navigation"
@@ -280,37 +303,52 @@
         },
         {
           "command": "sshMultiConnect.createRemoteFile",
-          "when": "viewItem == remoteDirectory",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory)",
           "group": "inline@1"
         },
         {
           "command": "sshMultiConnect.createRemoteFolder",
-          "when": "viewItem == remoteDirectory",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory)",
           "group": "inline@2"
         },
         {
+          "command": "sshMultiConnect.copyToHost",
+          "when": "viewItem == remoteFile || viewItem == remoteDirectory",
+          "group": "6_transfer@0"
+        },
+        {
+          "command": "sshMultiConnect.uploadToRemote",
+          "when": "!listMultiSelection && (viewItem == remoteFile || viewItem == remoteDirectory)",
+          "group": "6_transfer@2"
+        },
+        {
+          "command": "sshMultiConnect.downloadRemote",
+          "when": "viewItem == remoteFile || viewItem == remoteDirectory",
+          "group": "6_transfer@1"
+        },
+        {
           "command": "sshMultiConnect.openRemoteFile",
-          "when": "viewItem == remoteFile",
+          "when": "!listMultiSelection && (viewItem == remoteFile)",
           "group": "1_open@1"
         },
         {
           "command": "sshMultiConnect.createRemoteFile",
-          "when": "viewItem == remoteDirectory",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory)",
           "group": "2_new@1"
         },
         {
           "command": "sshMultiConnect.createRemoteFolder",
-          "when": "viewItem == remoteDirectory",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory)",
           "group": "2_new@2"
         },
         {
           "command": "sshMultiConnect.editPermissions",
-          "when": "viewItem == remoteDirectory || viewItem == remoteFile",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory || viewItem == remoteFile)",
           "group": "3_modify@1"
         },
         {
           "command": "sshMultiConnect.renameRemote",
-          "when": "viewItem == remoteDirectory || viewItem == remoteFile",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory || viewItem == remoteFile)",
           "group": "3_modify@2"
         },
         {
@@ -422,6 +460,18 @@
         },
         {
           "command": "sshMultiConnect.copyRemotePath",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.copyToHost",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.downloadRemote",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.uploadToRemote",
           "when": "false"
         },
         {

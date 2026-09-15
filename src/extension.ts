@@ -18,7 +18,11 @@ import { countInFolder } from './utils/folders';
 import { TerminalPathFollower } from './terminalFollow';
 import { TunnelManager } from './tunnels';
 import { CredentialStore } from './credentials';
+import { RemoteFilesDropController } from './remoteDropController';
 import { CommandResultsDocuments, RESULTS_SCHEME } from './commandResultsDocument';
+import { copyToHost } from './remoteCopyUi';
+import { downloadRemote } from './remoteDownloadUi';
+import { uploadToRemote } from './remoteUploadUi';
 import { runCommandOnHosts } from './multiCommandUi';
 import { SSHTunnelTreeItem } from './tunnelUi';
 import { followPathInTerminal } from './utils/settings';
@@ -55,10 +59,20 @@ export function activate(context: vscode.ExtensionContext) {
     registerTreeAndWebviewProviders(context, sshViewProvider);
 
     const pathFollower = new TerminalPathFollower(followPathInTerminal);
-    const remoteFilesView = new RemoteFilesView(item => {
-        showRemoteItemDetails(item);
-        followSelectionInTerminal(item, sshViewProvider, pathFollower);
-    });
+    const remoteFilesView = new RemoteFilesView(
+        selection => {
+            showRemoteItemDetails(selection);
+            // Following a selection only makes sense for a single entry.
+            if (selection.length === 1) {
+                followSelectionInTerminal(selection[0], sshViewProvider, pathFollower);
+            }
+        },
+        view =>
+            new RemoteFilesDropController(() => {
+                const provider = view.provider;
+                return provider instanceof RemoteFileProvider ? provider : undefined;
+            })
+    );
     remoteFilesView.setProvider(new EmptyRemoteFileProvider());
     context.subscriptions.push(remoteFilesView);
     sshViewProvider.setRemoteFilesView(remoteFilesView);
@@ -98,16 +112,19 @@ export function activate(context: vscode.ExtensionContext) {
  * The panel is updated but not focused, so browsing the tree with the arrow
  * keys is not interrupted.
  *
- * @param item The item selected in the remote files tree.
+ * @param selection What is selected in the remote files tree.
  */
-function showRemoteItemDetails(item: vscode.TreeItem): void {
-    if (!(item instanceof RemoteFileTreeItem)) {
+function showRemoteItemDetails(selection: readonly vscode.TreeItem[]): void {
+    const entries = selection.filter((item): item is RemoteFileTreeItem => item instanceof RemoteFileTreeItem);
+    if (entries.length === 0) {
         return;
     }
 
-    const provider = RemoteFileProvider.getProviderByConnectionId(item.connection.id);
-    provider?.showDetails(item).catch((error: unknown) => {
-        console.error(`Could not show details for ${item.resourceUri.path}:`, error);
+    const provider = RemoteFileProvider.getProviderByConnectionId(entries[0].connection.id);
+    const shown = entries.length === 1 ? provider?.showDetails(entries[0]) : provider?.showSelectionSummary(entries);
+
+    shown?.catch((error: unknown) => {
+        console.error('Could not show details for the selection:', error);
     });
 }
 
@@ -232,7 +249,8 @@ function registerCommands(
         },
         {
             command: 'sshMultiConnect.deleteRemote',
-            callback: (node: RemoteFileTreeItem) => withRemoteProvider(node, provider => provider.deleteItem(node)),
+            callback: (node: RemoteFileTreeItem, selection?: RemoteFileTreeItem[]) =>
+                withRemoteProvider(node, provider => provider.deleteItem(selected(node, selection))),
         },
         {
             command: 'sshMultiConnect.addTunnel',
@@ -262,8 +280,45 @@ function registerCommands(
                 vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${context.extension.id}`),
         },
         {
+            command: 'sshMultiConnect.uploadToRemote',
+            callback: (node: RemoteFileTreeItem | undefined) =>
+                uploadToRemote(
+                    node?.connection.id ?? sshViewProvider.activeRemoteConnectionId,
+                    node ? { path: node.resourceUri.path, isDirectory: node.isDirectory } : undefined
+                ),
+        },
+        {
+            command: 'sshMultiConnect.downloadRemote',
+            callback: (node: RemoteFileTreeItem, selection?: RemoteFileTreeItem[]) =>
+                downloadRemote(
+                    node.connection,
+                    selected(node, selection).map(entry => ({
+                        path: entry.resourceUri.path,
+                        isDirectory: entry.isDirectory,
+                    }))
+                ),
+        },
+        {
+            command: 'sshMultiConnect.copyToHost',
+            callback: (node: RemoteFileTreeItem, selection?: RemoteFileTreeItem[]) =>
+                copyToHost(
+                    node.connection,
+                    selected(node, selection).map(entry => ({
+                        path: entry.resourceUri.path,
+                        isDirectory: entry.isDirectory,
+                    })),
+                    {
+                        hosts: () => sshViewProvider.connections,
+                        ensureConnected: connection => sshViewProvider.ensureConnected(connection),
+                        addHost: spec => sshViewProvider.addAndConnect(spec),
+                    },
+                    destination => sshViewProvider.getRemoteFileProvider(destination.id)?.refresh()
+                ),
+        },
+        {
             command: 'sshMultiConnect.copyRemotePath',
-            callback: (node: RemoteFileTreeItem) => withRemoteProvider(node, provider => provider.copyPath(node)),
+            callback: (node: RemoteFileTreeItem, selection?: RemoteFileTreeItem[]) =>
+                withRemoteProvider(node, provider => provider.copyPath(selected(node, selection))),
         },
         { command: 'sshMultiConnect.refreshRemoteFiles', callback: () => refreshRemoteFiles(sshViewProvider) },
         { command: 'sshMultiConnect.openMultiCommandPanel', callback: () => sshViewProvider.openMultiCommandPanel() },
@@ -295,6 +350,21 @@ function registerCommands(
     commands.forEach(({ command, callback }) => {
         context.subscriptions.push(vscode.commands.registerCommand(command, callback));
     });
+}
+
+/**
+ * The entries a command should act on.
+ *
+ * VS Code passes the clicked item first and the whole selection second, but
+ * only when the tree allows several; the second is missing for a command run
+ * from the palette or a single-selection tree.
+ *
+ * @param node The item the command was invoked on.
+ * @param selection Everything selected, when there is more than one.
+ * @returns The entries to act on.
+ */
+function selected(node: RemoteFileTreeItem, selection?: RemoteFileTreeItem[]): RemoteFileTreeItem[] {
+    return selection && selection.length > 0 ? selection : [node];
 }
 
 /**

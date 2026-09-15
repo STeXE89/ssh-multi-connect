@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { randomBytes } from 'crypto';
+import { SelectionSummary, describeSelection } from './utils/selectionSummary';
 
 /** An account as listed in the remote /etc/passwd or /etc/group. */
 export interface RemoteAccount {
@@ -109,6 +110,21 @@ const STYLES = `
     }
     .section {
         margin-bottom: 16px;
+    }
+    p.summary {
+        margin: 0 0 14px;
+        color: var(--vscode-descriptionForeground);
+        font-size: 0.9em;
+    }
+    ul.selection {
+        margin: 0;
+        padding-left: 18px;
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+    ul.selection li {
+        word-break: break-all;
+        line-height: 1.5;
     }
     .section-title {
         margin-bottom: 6px;
@@ -442,6 +458,27 @@ document.getElementById('cancelButton').addEventListener('click', () => {
 /** Renders the panel's idle state. */
 export function renderEmpty(): string {
     return page('File Details', '<div class="empty">Select a file or folder in Remote Files.</div>');
+}
+
+/**
+ * Renders the totals for a selection of several entries.
+ *
+ * A single entry has details worth showing; several have a different question
+ * behind them, which is how much has been picked.
+ *
+ * @param summary The selection's totals.
+ * @returns The panel's HTML.
+ */
+export function renderSelection(summary: SelectionSummary): string {
+    const rows = summary.names.map(name => `<li>${escapeHtml(name)}</li>`).join('');
+
+    const body = `
+        <h2>${summary.files + summary.folders} selected</h2>
+        <p class="summary">${escapeHtml(describeSelection(summary, formatBytes))}</p>
+        <ul class="selection">${rows}</ul>
+    `;
+
+    return page('File Details', body);
 }
 
 /**
