@@ -407,6 +407,7 @@
     "@typescript-eslint/parser": "^8.34.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "3.9.2",
     "eslint": "^9.28.0",
     "prettier": "^3.9.6",
     "typescript": "^5.8.3"
