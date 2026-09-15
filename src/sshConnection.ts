@@ -20,7 +20,8 @@ import {
 } from './utils/connectionEdit';
 import { accountLabel, hostPasswordPrompt } from './utils/authPrompts';
 import { missingTerminals, selectedTargets, splitTerminalName } from './utils/multiCommandTargets';
-import { splitTerminalsForMultiCommand } from './utils/settings';
+import { splitTerminalsForMultiCommand, autoReconnect, keepaliveSeconds } from './utils/settings';
+import { backoffDelays, canReconnectSilently, describeAttempt } from './utils/reconnect';
 import { SSHTreeDecorationProvider, connectionResourceUri, folderResourceUri } from './connectionDecorations';
 import { RemoteFilesView } from './remoteFilesView';
 import { TerminalPathFollower } from './terminalFollow';
@@ -71,6 +72,10 @@ export interface ExtendedSSHConnection extends SSHConnection {
     fingerprint?: string;
     /** The bastion chain this connection travels over, when it has one. */
     jump?: JumpChain;
+    /** Set while the user is deliberately disconnecting, so no reconnection follows. */
+    closing?: boolean;
+    /** Set while a reconnection is in progress, so a second one does not start. */
+    reconnecting?: boolean;
 }
 
 export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
@@ -801,10 +806,13 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
 
     /** Clears half-established state after a failed connection attempt. */
     private resetConnectionState(connection: ExtendedSSHConnection, treeItem: SSHConnectionTreeItem): void {
+        // A failed attempt is not a drop either.
+        connection.closing = true;
         connection.client?.end();
         connection.client = undefined;
         connection.jump?.dispose();
         connection.jump = undefined;
+        connection.closing = false;
         treeItem.connected = false;
         treeItem.updateContextValue();
         this._onDidChangeTreeData.fire(treeItem);
@@ -868,6 +876,9 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             return;
         }
 
+        // Marks this as wanted, so the close handler does not treat it as a
+        // drop and start rebuilding what the user just closed.
+        connection.closing = true;
         connection.client.end();
         connection.client = undefined;
         // The bastions exist only to carry this connection.
@@ -909,6 +920,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
 
         this.refresh();
 
+        connection.closing = false;
         vscode.window.showInformationMessage(`Connection to ${connection.host} has been closed.`);
     }
     /** Waits for the SSH handshake to finish, then opens the terminal. */
@@ -924,6 +936,11 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             const onReady = () => {
                 detach();
                 vscode.window.showInformationMessage(`Connected to ${connection.host}`);
+
+                // Nothing watched the connection after the handshake, so a
+                // link that died -- a suspended machine, most often -- left
+                // the host looking live until something tried to write to it.
+                client.once('close', () => this.handleConnectionLost(connection, treeItem, client));
 
                 treeItem.connected = true;
                 treeItem.updateContextValue();
@@ -950,6 +967,155 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             client.once('ready', onReady);
             client.once('error', onError);
         });
+    }
+
+    /**
+     * Handles a connection dying on its own.
+     *
+     * Distinct from disconnect(): nobody asked for this, the tunnels are worth
+     * keeping, and the host should come back if it can.
+     *
+     * @param connection The connection that died.
+     * @param treeItem Its row in the tree.
+     * @param client The client that closed, to ignore a stale event from an
+     * older one.
+     */
+    private handleConnectionLost(
+        connection: ExtendedSSHConnection,
+        treeItem: SSHConnectionTreeItem,
+        client: Client
+    ): void {
+        // A deliberate disconnect, or a client already replaced, is not a drop.
+        if (connection.closing || connection.client !== client) {
+            return;
+        }
+
+        connection.client = undefined;
+        connection.jump?.dispose();
+        connection.jump = undefined;
+
+        this.terminals.get(connection.id)?.dispose();
+        this.terminals.delete(connection.id);
+        this.pathFollower?.forget(connection.id);
+
+        treeItem.connected = false;
+        treeItem.updateContextValue();
+        this.refresh();
+
+        if (!autoReconnect() || !canReconnectSilently(connection)) {
+            vscode.window.showWarningMessage(
+                `Lost the connection to ${connection.host}.` +
+                    (canReconnectSilently(connection) ? '' : ' Connect again to enter its credentials.')
+            );
+            return;
+        }
+
+        void this.reconnect(connection, treeItem);
+    }
+
+    /**
+     * Rebuilds a dropped connection, reusing what it was authenticated with.
+     *
+     * The tunnels that were running are started again once the connection is
+     * back: they are the reason a dropped link is worth rebuilding at all.
+     *
+     * @param connection The connection to rebuild.
+     * @param treeItem Its row in the tree.
+     */
+    private async reconnect(connection: ExtendedSSHConnection, treeItem: SSHConnectionTreeItem): Promise<void> {
+        if (connection.reconnecting) {
+            return;
+        }
+
+        connection.reconnecting = true;
+        const delays = backoffDelays(5);
+
+        try {
+            for (const [attempt, delay] of delays.entries()) {
+                await new Promise(resolve => setTimeout(resolve, delay));
+
+                if (connection.closing || connection.client) {
+                    return;
+                }
+
+                this.setStatus(treeItem, describeAttempt(connection.host, attempt, delays.length));
+
+                try {
+                    connection.client = new Client();
+                    await this.openJumpChain(connection);
+                    await this.reconnectWithCachedCredentials(connection, treeItem);
+
+                    vscode.window.showInformationMessage(`Reconnected to ${connection.host}.`);
+                    await this.restartTunnels(connection);
+                    return;
+                } catch (error) {
+                    console.error(`Reconnect to ${connection.host} failed:`, error);
+                    connection.client?.end();
+                    connection.client = undefined;
+                    connection.jump?.dispose();
+                    connection.jump = undefined;
+                }
+            }
+
+            vscode.window.showWarningMessage(
+                `Could not reconnect to ${connection.host} after ${delays.length} attempts. Connect again when it is reachable.`
+            );
+        } finally {
+            connection.reconnecting = false;
+            this.setStatus(treeItem, undefined);
+            this.refresh();
+        }
+    }
+
+    /**
+     * Connects using only what is already held, never prompting.
+     *
+     * @param connection The connection to rebuild.
+     * @param treeItem Its row in the tree.
+     */
+    private async reconnectWithCachedCredentials(
+        connection: ExtendedSSHConnection,
+        treeItem: SSHConnectionTreeItem
+    ): Promise<void> {
+        const connected = this.waitForConnection(connection, treeItem);
+
+        connection.client!.connect({
+            host: connection.hostname,
+            port: connection.port ?? SSH_DEFAULT_PORT,
+            username: connection.user,
+            ...(connection.password
+                ? { password: connection.password }
+                : {
+                      privateKey: Buffer.from(fileUtils.readFile(resolveIdentityFile(connection.identityFile!))),
+                      passphrase: connection.passphrase,
+                  }),
+            ...connectionTuning(connection, agentAddress(), keepaliveSeconds()),
+            ...this.transportOptions(connection),
+        });
+
+        await connected;
+    }
+
+    /**
+     * Starts the tunnels a dropped connection was carrying.
+     *
+     * @param connection The connection that came back.
+     */
+    private async restartTunnels(connection: ExtendedSSHConnection): Promise<void> {
+        for (const entry of this.tunnels?.list(connection.id) ?? []) {
+            await this.tunnels?.start(connection.id, entry.config.id);
+        }
+    }
+
+    /**
+     * Shows what a connection is doing in its tree row.
+     *
+     * @param treeItem The row.
+     * @param status The text, or undefined to clear it.
+     */
+    private setStatus(treeItem: SSHConnectionTreeItem, status: string | undefined): void {
+        treeItem.description = status ?? describeTarget(treeItem.connection);
+        this._onDidChangeTreeData.fire(treeItem);
     }
 
     public handleTerminalSelectionChange(terminal: vscode.Terminal) {
@@ -1021,7 +1187,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             username: connection.user,
             password,
             port: connection.port ?? SSH_DEFAULT_PORT,
-            ...connectionTuning(connection, agentAddress()),
+            ...connectionTuning(connection, agentAddress(), keepaliveSeconds()),
             ...this.transportOptions(connection),
         });
 
@@ -1074,7 +1240,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             username: connection.user,
             privateKey,
             passphrase,
-            ...connectionTuning(connection, agentAddress()),
+            ...connectionTuning(connection, agentAddress(), keepaliveSeconds()),
             ...this.transportOptions(connection),
         });
 
@@ -1164,8 +1330,15 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         ];
 
         const failed: string[] = [];
+        const known = new Set((this.tunnels.list(connection.id) ?? []).map(entry => entry.config.id));
 
         for (const [index, { spec, kind }] of specs.entries()) {
+            // A reconnection keeps the tunnels it had, so adding them again
+            // would only collide with themselves.
+            if (known.has(`config-${kind}-${index}`)) {
+                continue;
+            }
+
             const parsed = parseForwardSpec(spec, kind);
             if (!parsed) {
                 failed.push(`${kind === 'local' ? 'LocalForward' : 'RemoteForward'} ${spec} (not understood)`);

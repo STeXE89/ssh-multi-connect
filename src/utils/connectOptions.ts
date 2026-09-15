@@ -1,5 +1,6 @@
 import type { CompressionAlgorithm } from 'ssh2';
 import { SSHConnection } from './sshConfig';
+import { defaultKeepalive } from './reconnect';
 
 /** Compression preference, most preferred first. */
 const COMPRESS_ON: CompressionAlgorithm[] = ['zlib@openssh.com', 'zlib', 'none'];
@@ -45,8 +46,13 @@ export function agentAddress(
  *   the default quietly reintroducing this machine's own.
  * @returns Options to merge into ssh2's connect config.
  */
-export function connectionTuning(connection: SSHConnection, agent: string | undefined): ConnectionTuning {
-    const tuning: ConnectionTuning = {};
+export function connectionTuning(
+    connection: SSHConnection,
+    agent: string | undefined,
+    keepaliveFallbackSeconds = 0
+): ConnectionTuning {
+    // The fallback first, so anything the host's own config says replaces it.
+    const tuning: ConnectionTuning = { ...defaultKeepalive(keepaliveFallbackSeconds) };
 
     if (connection.serverAliveInterval !== undefined && connection.serverAliveInterval >= 0) {
         // ssh_config counts seconds; ssh2 wants milliseconds.

@@ -113,6 +113,19 @@ This extension contributes the following settings:
   second shell on each connection; closing one does not disconnect the host. Turn it
   off to send to each connection's own terminal instead.
 
+* `sshMultiConnect.autoReconnect` (default `true`): rebuild a connection that
+  drops, without asking for its password again. Suspending the machine is the usual
+  cause: the link is gone, but nothing notices until something writes to it, so the
+  host sits there looking connected. Reconnection reuses the credentials already held
+  for this session and reopens the tunnels that were running; a host whose password
+  was never typed this session is left alone rather than prompting at an unattended
+  screen.
+
+* `sshMultiConnect.keepaliveInterval` (default `30`): seconds between keepalive
+  probes on connections whose `ssh_config` entry does not set `ServerAliveInterval`.
+  Three missed probes end the connection, so the default notices a drop in about 90
+  seconds. 0 disables probing.
+
 * `sshMultiConnect.savePasswords` (default `false`): keep the passwords you type in
   the operating system's keychain, so a host does not ask again. While it is off, a
   password is only held in memory for the life of the connection. **Forget Saved

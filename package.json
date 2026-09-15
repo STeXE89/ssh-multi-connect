@@ -207,6 +207,17 @@
           "default": true,
           "markdownDescription": "Send a multi-host command to a split terminal group, one pane per selected host, so every host's output is visible at once.\n\nThese are terminals the panel opens itself, a second shell on each connection: VS Code can only place a terminal in a split group as it is created. Closing one does not disconnect the host.\n\nTurn this off to send the command to each connection's own terminal instead, as before."
         },
+        "sshMultiConnect.autoReconnect": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Rebuild a connection that drops, without asking for its password again.\n\nThe usual cause is suspending the machine: the link is gone, but nothing notices until something writes to it, so the host sits there looking connected. Reconnection reuses the credentials already held for this session and reopens the tunnels that were running. A host whose password was never typed in this session is left alone rather than prompting at an unattended screen."
+        },
+        "sshMultiConnect.keepaliveInterval": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "markdownDescription": "Seconds between keepalive probes on connections whose `ssh_config` entry does not set `ServerAliveInterval`.\n\nWithout a probe, a dropped link is only noticed when something tries to write to it. Three missed probes end the connection, so the default notices a drop in about 90 seconds. `ServerAliveInterval` in `ssh_config` overrides this; 0 disables probing."
+        },
         "sshMultiConnect.savePasswords": {
           "type": "boolean",
           "default": false,
