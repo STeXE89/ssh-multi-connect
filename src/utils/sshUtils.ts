@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { readFile, writeFile, fileExists, ensureDirectoryExists, ensureFileExists, appendToFile } from './fileUtils';
 import { SSH_DEFAULT_PORT, SSHConnection, parseSshConfig, upsertConnection, removeHost } from './sshConfig';
 import { isValidHostname } from './shell';
+import { knownHostsLine } from './hostKeys';
 
 export const SSH_CONFIG_DIR = path.join(os.homedir(), '.ssh');
 export const SSH_CONFIG_PATH = path.join(SSH_CONFIG_DIR, 'config');
@@ -301,4 +302,26 @@ export const getHostKeyFromKeyscan = (hostname: string, port: number = SSH_DEFAU
     } catch {
         throw new Error(`Failed to retrieve host fingerprint for "${hostname}".`);
     }
+};
+
+/**
+ * Records a host key that arrived during a handshake.
+ *
+ * Used for hosts `ssh-keyscan` cannot reach on its own -- anything behind a
+ * bastion -- where the key is only ever seen through the tunnel.
+ *
+ * @param hostname The address the key belongs to.
+ * @param port The port it was served on.
+ * @param key The key blob from the handshake.
+ * @returns True when the key was written.
+ */
+export const rememberHostKey = (hostname: string, port: number, key: Buffer): boolean => {
+    const line = knownHostsLine(hostname, port, key);
+    if (!line) {
+        return false;
+    }
+
+    ensureFileExists(SSH_KNOWN_HOSTS_PATH, 0o600);
+    appendToFile(SSH_KNOWN_HOSTS_PATH, `${line}\n`);
+    return true;
 };

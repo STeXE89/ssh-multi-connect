@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Client, utils } from 'ssh2';
+import { Client, utils, ConnectConfig } from 'ssh2';
 import {
     MULTICOMMANDPANEL_HTML_PATH,
     MULTICOMMANDPANEL_CSS_PATH,
@@ -8,12 +8,15 @@ import {
 } from './constants/globals';
 import * as fileUtils from './utils/fileUtils';
 import { SSHPseudoterminal } from './sshTerminal';
+import { connectionTuning, agentAddress } from './utils/connectOptions';
 import { SSHTreeDecorationProvider, connectionResourceUri, folderResourceUri } from './connectionDecorations';
 import { RemoteFilesView } from './remoteFilesView';
 import { TerminalPathFollower } from './terminalFollow';
 import { TunnelManager } from './tunnels';
+import { JumpChain, openJumpChain } from './proxyChain';
+import { jumpPlanFor, resolveHost, createAuthProvider, createKeyApprover } from './jumpSession';
 import { SSHTunnelTreeItem, promptForTunnel } from './tunnelUi';
-import { tunnelLabel, tunnelFlag } from './utils/tunnelModel';
+import { tunnelLabel, tunnelFlag, parseForwardSpec } from './utils/tunnelModel';
 import { FileDetailsViewProvider } from './fileDetailsView';
 import {
     collectFolderPaths,
@@ -46,6 +49,8 @@ export interface ExtendedSSHConnection extends SSHConnection {
     privateKey?: Buffer;
     passphrase?: string;
     fingerprint?: string;
+    /** The bastion chain this connection travels over, when it has one. */
+    jump?: JumpChain;
 }
 
 export async function addSSHConnection(sshViewProvider: SSHViewProvider) {
@@ -561,7 +566,12 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         }
 
         try {
-            await this.ensureKnownHost(connection);
+            // A host behind a bastion is only reachable through the chain, so
+            // the chain is built first and its key check replaces the scan.
+            const jumped = await this.openJumpChain(connection);
+            if (!jumped) {
+                await this.ensureKnownHost(connection);
+            }
             await this.tryConnect(connection, treeItem);
         } catch (error) {
             vscode.window.showErrorMessage(`Could not connect to "${connection.host}": ${errorMessage(error)}`);
@@ -605,10 +615,66 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         }
     }
 
+    /**
+     * Opens the bastion chain a host's config asks for.
+     *
+     * @param connection The host being connected to.
+     * @returns True when the connection now travels over a chain.
+     */
+    private async openJumpChain(connection: ExtendedSSHConnection): Promise<boolean> {
+        const plan = jumpPlanFor(connection);
+
+        if (plan.kind === 'unsupported') {
+            throw new Error(
+                `"${plan.command}" is not a plain jump, so it cannot be run from here. ` +
+                    'Rewrite it as ProxyJump, or connect with the ssh command instead.'
+            );
+        }
+
+        if (plan.kind === 'direct') {
+            return false;
+        }
+
+        connection.jump = await openJumpChain(
+            plan.hops,
+            { host: connection.hostname, port: connection.port ?? SSH_DEFAULT_PORT },
+            resolveHost,
+            createAuthProvider(),
+            createKeyApprover()
+        );
+
+        return true;
+    }
+
+    /**
+     * The transport options for a connection, which differ only when it is
+     * carried over a bastion chain.
+     *
+     * @param connection The host being connected to.
+     * @returns Options to spread into ssh2's connect config.
+     */
+    private transportOptions(connection: ExtendedSSHConnection): ConnectConfig {
+        if (!connection.jump) {
+            return {};
+        }
+
+        const target = { host: connection.hostname, port: connection.port ?? SSH_DEFAULT_PORT, username: '' };
+        const approve = createKeyApprover();
+
+        return {
+            sock: connection.jump.sock,
+            hostVerifier: (key: Buffer, callback: (ok: boolean) => void) => {
+                approve(target, key).then(callback, () => callback(false));
+            },
+        };
+    }
+
     /** Clears half-established state after a failed connection attempt. */
     private resetConnectionState(connection: ExtendedSSHConnection, treeItem: SSHConnectionTreeItem): void {
         connection.client?.end();
         connection.client = undefined;
+        connection.jump?.dispose();
+        connection.jump = undefined;
         treeItem.connected = false;
         treeItem.updateContextValue();
         this._onDidChangeTreeData.fire(treeItem);
@@ -648,6 +714,9 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
 
         connection.client.end();
         connection.client = undefined;
+        // The bastions exist only to carry this connection.
+        connection.jump?.dispose();
+        connection.jump = undefined;
         treeItem.connected = false;
         treeItem.updateContextValue();
 
@@ -713,6 +782,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
                 terminal.show();
 
                 void this.loadRemoteFiles(connection, '/');
+                void this.startConfiguredTunnels(connection);
                 resolve();
             };
 
@@ -795,6 +865,8 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             username: connection.user,
             password,
             port: connection.port ?? SSH_DEFAULT_PORT,
+            ...connectionTuning(connection, agentAddress()),
+            ...this.transportOptions(connection),
         });
 
         await connected;
@@ -843,6 +915,8 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             username: connection.user,
             privateKey,
             passphrase,
+            ...connectionTuning(connection, agentAddress()),
+            ...this.transportOptions(connection),
         });
 
         await connected;
@@ -897,6 +971,54 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
      *
      * @param treeItem The connection to tunnel over.
      */
+    /**
+     * Opens the tunnels the host's ssh_config asks for.
+     *
+     * `ssh` starts `LocalForward`/`RemoteForward` entries itself on connect, so
+     * they are started here too rather than offered as a prompt. Each one
+     * appears in the tree like any other tunnel and can be stopped there.
+     *
+     * @param connection The connection that has just become ready.
+     */
+    private async startConfiguredTunnels(connection: ExtendedSSHConnection): Promise<void> {
+        if (!this.tunnels) {
+            return;
+        }
+
+        const specs = [
+            ...(connection.localForward ?? []).map(spec => ({ spec, kind: 'local' as const })),
+            ...(connection.remoteForward ?? []).map(spec => ({ spec, kind: 'remote' as const })),
+        ];
+
+        const failed: string[] = [];
+
+        for (const [index, { spec, kind }] of specs.entries()) {
+            const parsed = parseForwardSpec(spec, kind);
+            if (!parsed) {
+                failed.push(`${kind === 'local' ? 'LocalForward' : 'RemoteForward'} ${spec} (not understood)`);
+                continue;
+            }
+
+            // Stable across reconnects, so the tree keeps its expansion state.
+            const entry = await this.tunnels.add(connection.id, { ...parsed, id: `config-${kind}-${index}` });
+            if (!entry) {
+                failed.push(`${tunnelLabel({ ...parsed, id: '' })} (a tunnel already listens there)`);
+            } else if (entry.state === 'error') {
+                failed.push(`${tunnelLabel(entry.config)} (${entry.error})`);
+            }
+        }
+
+        if (specs.length > 0) {
+            this._onDidChangeTreeData.fire();
+        }
+
+        if (failed.length > 0) {
+            vscode.window.showWarningMessage(
+                `Some tunnels configured for ${connection.host} did not open: ${failed.join('; ')}.`
+            );
+        }
+    }
+
     public async addTunnel(treeItem: SSHConnectionTreeItem): Promise<void> {
         const connection = treeItem.connection;
 
@@ -1006,6 +1128,7 @@ export function connectionTooltip(connection: ExtendedSSHConnection): string {
         connection.user ? `User: ${connection.user}` : undefined,
         `Port: ${connection.port ?? SSH_DEFAULT_PORT}`,
         connection.identityFile ? `IdentityFile: ${connection.identityFile}` : undefined,
+        connection.proxyJump ? `Via: ${connection.proxyJump}` : undefined,
         connection.vFolderTag ? `Folder: ${connection.vFolderTag}` : undefined,
     ];
 

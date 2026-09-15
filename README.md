@@ -55,6 +55,33 @@ reaches the remote host.
 your machine can see. The server needs `AllowTcpForwarding yes`, plus
 `GatewayPorts yes` to bind anything other than its own localhost.
 
+## Hosts behind a bastion
+
+A host reached through a jump server is configured the way `ssh` configures it:
+
+```
+Host db
+  HostName 10.0.0.5
+  ProxyJump jump@bastion.example.com
+```
+
+Each hop is a real SSH connection carried inside the previous one, so no
+external `ssh` process is involved. Chains of several hops work, and each hop
+can have its own `Host` block for its user, port and key. Because a jumped host
+cannot be reached by `ssh-keyscan`, its host key is checked during the
+handshake instead: an unknown key is recorded, and a changed one stops the
+connection until you accept it.
+
+A `ProxyCommand` is honoured when it is a jump written the long way
+(`ssh -W %h:%p bastion`, or the older `ssh bastion nc %h %p`). Anything else is
+reported rather than run.
+
+## Port forwards from ssh_config
+
+`LocalForward` and `RemoteForward` entries open as tunnels when the host
+connects, as `ssh` opens them, and appear in the tree where they can be stopped
+and restarted.
+
 ## Extension Settings
 
 This extension contributes the following settings:

@@ -2,6 +2,14 @@
 
 All notable changes to the "ssh-multi-connect" extension will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Hosts behind a bastion, through `ProxyJump` and the `ProxyCommand` forms that mean the same thing.
+- `LocalForward` and `RemoteForward` entries open as tunnels on connect.
+- `ServerAliveInterval`, `ServerAliveCountMax`, `Compression` and `ForwardAgent` are honoured.
+
 ## [0.0.9] - 2026/09/09
 
 ### Added
