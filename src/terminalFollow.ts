@@ -54,6 +54,20 @@ export class TerminalPathFollower {
         return true;
     }
 
+    /**
+     * Records a directory the terminal is already in.
+     *
+     * Used when the move came from the terminal rather than the tree, so the
+     * tree does not turn around and send a `cd` back to where the shell
+     * already is.
+     *
+     * @param connectionId The connection.
+     * @param directory The directory the shell reported.
+     */
+    remember(connectionId: string, directory: string): void {
+        this.lastDirectory.set(connectionId, directory);
+    }
+
     /** Drops the remembered directory for a connection, e.g. on disconnect. */
     forget(connectionId: string): void {
         this.lastDirectory.delete(connectionId);

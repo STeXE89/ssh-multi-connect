@@ -236,6 +236,11 @@
           "minimum": 0,
           "markdownDescription": "Seconds between keepalive probes on connections whose `ssh_config` entry does not set `ServerAliveInterval`.\n\nWithout a probe, a dropped link is only noticed when something tries to write to it. Three missed probes end the connection, so the default notices a drop in about 90 seconds. `ServerAliveInterval` in `ssh_config` overrides this; 0 disables probing."
         },
+        "sshMultiConnect.followTerminalDirectory": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Move **Remote Files** to the folder the connection's terminal is in \u2014 the other direction of `#sshMultiConnect.followPathInTerminal#`. Both can be on at once; they will not chase each other.\n\n**When it is on:** every terminal opened from then on runs one setup line as it starts, which makes the shell report its folder before each prompt. You will see that line in the terminal, and the shell carries an extra function on `PROMPT_COMMAND` (bash) or in `precmd_functions` (zsh) until it exits. Terminals already open are not touched; reopen one to have it report.\n\n**What you get:** the tree follows any change the shell reports, including one made by a script, by `pushd`, or by a `cd` inside a command you ran, not only a `cd` you typed yourself.\n\n**Shells:** only bash and zsh can report. On dash, ash, fish, csh and anything else the setup line does nothing at all, silently, and the tree simply will not follow."
+        },
         "sshMultiConnect.savePasswords": {
           "type": "boolean",
           "default": false,
@@ -244,7 +249,7 @@
         "sshMultiConnect.followPathInTerminal": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Change the connection's terminal to the directory you select in **Remote Files**. Selecting a file uses its parent folder.\n\nThe `cd` is typed into the terminal, so it can disturb a command that is already running there. It is only sent when the directory actually changes."
+          "markdownDescription": "Change the connection's terminal to the folder you select in **Remote Files**. Selecting a file uses the folder holding it.\n\n**When it is on:** a `cd` is typed into that connection's terminal, exactly as if you had typed it. It is sent only when the folder actually changes, so clicking through several files in one folder sends nothing.\n\n**What to watch for:** because it is typed, it goes wherever that terminal's input goes. If a program is running there (an editor, `top`, `less`) or a command is half typed, the `cd` lands in that instead. It is sent to the connection's own terminal, not to the split group the multi-command panel opens.\n\n**Shells:** every shell understands `cd`, so this works on all of them, bash, zsh, dash, ash and fish alike."
         }
       }
     },

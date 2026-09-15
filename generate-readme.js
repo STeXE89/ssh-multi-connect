@@ -119,10 +119,33 @@ left alone by the editor, since rewriting it would drop that line.
 
 This extension contributes the following settings:
 
-* \`sshMultiConnect.followPathInTerminal\` (default \`false\`): change the connection's
-  terminal to the directory you select in **Remote Files**. Selecting a file uses its
-  parent folder. The \`cd\` is typed into the terminal, so it can disturb a command that
-  is already running there; it is only sent when the directory actually changes.
+### Keeping the tree and the terminal together
+
+The two directions are separate settings, both off by default, and both can be on at
+once -- they will not chase each other.
+
+* \`sshMultiConnect.followPathInTerminal\` (default \`false\`): **tree to terminal**.
+  Selecting a folder in **Remote Files** types a \`cd\` into that connection's terminal,
+  exactly as if you had typed it, and only when the folder actually changes. Selecting
+  a file uses the folder holding it.
+
+  Because it is typed, it goes wherever that terminal's input goes: if a program is
+  running there -- an editor, \`top\`, \`less\` -- or a command is half typed, the \`cd\`
+  lands in that instead. It reaches the connection's own terminal, not the split group
+  the multi-command panel opens. Every shell understands \`cd\`, so this one works on
+  all of them.
+
+* \`sshMultiConnect.followTerminalDirectory\` (default \`false\`): **terminal to tree**.
+  Every terminal opened from then on runs one setup line as it starts, which makes the
+  shell report its folder before each prompt; the tree then follows. You will see that
+  line in the terminal, and the shell carries an extra function on \`PROMPT_COMMAND\`
+  (bash) or in \`precmd_functions\` (zsh) until it exits. Terminals already open are not
+  touched -- reopen one to have it report.
+
+  The tree follows any change the shell reports, including one made by a script, by
+  \`pushd\`, or by a \`cd\` inside a command you ran. **Only bash and zsh can report**:
+  on dash, ash, fish, csh and anything else the setup line does nothing at all,
+  silently, and the tree will not follow.
 
 * \`sshMultiConnect.splitTerminalsForMultiCommand\` (default \`true\`): send a
   multi-host command to a split terminal group, one pane per selected host, so every

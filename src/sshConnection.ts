@@ -21,7 +21,12 @@ import {
 import { accountLabel, hostPasswordPrompt } from './utils/authPrompts';
 import { RemoteViewAction, remoteViewAfterDisconnect } from './utils/viewState';
 import { missingTerminals, selectedTargets, splitTerminalName } from './utils/multiCommandTargets';
-import { splitTerminalsForMultiCommand, autoReconnect, keepaliveSeconds } from './utils/settings';
+import {
+    splitTerminalsForMultiCommand,
+    autoReconnect,
+    keepaliveSeconds,
+    followTerminalDirectory,
+} from './utils/settings';
 import { backoffDelays, canReconnectSilently, describeAttempt } from './utils/reconnect';
 import { SSHTreeDecorationProvider, connectionResourceUri, folderResourceUri } from './connectionDecorations';
 import { RemoteFilesView } from './remoteFilesView';
@@ -974,9 +979,12 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
                 treeItem.updateContextValue();
                 this._onDidChangeTreeData.fire(treeItem);
 
+                const pty = new SSHPseudoterminal(client, followTerminalDirectory());
+                pty.onDidChangeDirectory(directory => this.followTerminalIntoTree(connection, directory));
+
                 const terminal = vscode.window.createTerminal({
                     name: `${connection.user}@${connection.host}`,
-                    pty: new SSHPseudoterminal(client),
+                    pty,
                 });
 
                 this.registerTerminal(connection, terminal);
@@ -1144,6 +1152,34 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
     private setStatus(treeItem: SSHConnectionTreeItem, status: string | undefined): void {
         treeItem.description = status ?? describeTarget(treeItem.connection);
         this._onDidChangeTreeData.fire(treeItem);
+    }
+
+    /**
+     * Moves the Remote Files tree to where the terminal is.
+     *
+     * The opposite of the tree driving the terminal, and the two must not
+     * chase each other: a change is ignored when the tree is already there,
+     * which is exactly the case after the tree sent the `cd` itself.
+     *
+     * @param connection The connection whose shell reported a directory.
+     * @param directory The shell's working directory.
+     */
+    private followTerminalIntoTree(connection: ExtendedSSHConnection, directory: string): void {
+        if (!followTerminalDirectory()) {
+            return;
+        }
+
+        const provider = RemoteFileProvider.getProviderByConnectionId(connection.id);
+        if (!provider || provider.rootPath === directory) {
+            return;
+        }
+
+        // Keeps the tree-to-terminal direction from echoing this straight back.
+        this.pathFollower?.remember(connection.id, directory);
+
+        provider.updateConnection(connection, directory);
+        provider.refresh();
+        this.remoteFilesView?.setProvider(provider);
     }
 
     public handleTerminalSelectionChange(terminal: vscode.Terminal) {

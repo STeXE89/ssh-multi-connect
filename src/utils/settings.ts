@@ -38,3 +38,15 @@ export function autoReconnect(): boolean {
 export function keepaliveSeconds(): number {
     return vscode.workspace.getConfiguration(SECTION).get<number>('keepaliveInterval', 30);
 }
+
+/**
+ * Whether the Remote Files tree should follow the terminal's directory.
+ *
+ * The other direction of `followPathInTerminal`: this one asks the shell to
+ * report where it is, and moves the tree to match.
+ *
+ * @returns The user's current preference.
+ */
+export function followTerminalDirectory(): boolean {
+    return vscode.workspace.getConfiguration(SECTION).get<boolean>('followTerminalDirectory', false);
+}
