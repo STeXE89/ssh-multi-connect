@@ -13,7 +13,7 @@ import { AuthProvider, HopPosition, HopTarget, KeyApprover, HostResolver } from 
 import { JumpHop, parseProxyJump, proxyJumpFromCommand } from './utils/proxyJump';
 import { SSHConnection } from './utils/sshConfig';
 import { fingerprintOfKey } from './utils/hostKeys';
-import { getConnection, isKnownHost, removeKnownHost, rememberHostKey } from './utils/sshUtils';
+import { getConnection, isKnownHost, removeKnownHost, rememberHostKey, resolveIdentityFile } from './utils/sshUtils';
 import { readFile } from './utils/fileUtils';
 import { accountLabel, hopPasswordPrompt, hopPassphrasePrompt } from './utils/authPrompts';
 
@@ -93,7 +93,7 @@ export function createAuthProvider(destination: string): AuthProvider {
 async function keyCredentials(identityFile: string, label: string, position: HopPosition, destination: string) {
     let privateKey: Buffer;
     try {
-        privateKey = Buffer.from(readFile(identityFile));
+        privateKey = Buffer.from(readFile(resolveIdentityFile(identityFile)));
     } catch (error) {
         throw new Error(`Jump host ${label}: cannot read "${identityFile}": ${(error as Error).message}`);
     }

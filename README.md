@@ -15,6 +15,7 @@ This extension 'ssh-multi-connect' allows you to group SSH connections into fold
 - Create, rename and delete remote files and folders from the right-click menu.
 - Retry an operation with sudo when the remote user lacks permission.
 - Run one command across hosts and read the collected output in one report.
+- Keep a tunnel in `ssh_config` so it opens on every connect.
 - Reach hosts behind a bastion, with `ProxyJump`, set from the connection's right-click menu.
 - Connect from the command palette with **Connect to SSH Host...**.
 - Runs on Windows, macOS and Linux.
@@ -88,6 +89,14 @@ reported rather than run.
 `LocalForward` and `RemoteForward` entries open as tunnels when the host
 connects, as `ssh` opens them, and appear in the tree where they can be stopped
 and restarted.
+
+## Reading ssh_config
+
+The host list is your `~/.ssh/config`, read the way `ssh` reads it:
+`Include` directives are followed, globs and all, and a leading `~` in a path
+is expanded. A host defined in an included file is written back to that file,
+not copied into the main config. A block that itself contains an `Include` is
+left alone by the editor, since rewriting it would drop that line.
 
 ## Extension Settings
 

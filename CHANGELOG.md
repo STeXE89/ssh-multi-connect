@@ -13,8 +13,14 @@ All notable changes to the "ssh-multi-connect" extension will be documented in t
 - **Edit Connection...** on a host, for its address, user, port, jump hosts and key.
 - Jump hosts can be set when adding a connection, and each credential prompt names the host asking.
 - Optional password storage in the operating system's keychain, off by default.
+- **Keep This Tunnel** writes a running tunnel to `ssh_config`, so it opens on every connect.
 - **Run Command on Hosts...** runs one command on several hosts and opens a report, grouping the hosts that agree.
 - The multi-command panel shows the selected hosts side by side in a split terminal group.
+
+### Fixed
+
+- `IdentityFile ~/.ssh/id_ed25519` failed, because a leading `~` was never expanded.
+- Hosts defined in files pulled in with `Include` were invisible.
 
 ## [0.0.9] - 2026/09/09
 

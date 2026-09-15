@@ -152,6 +152,12 @@
         "tooltip": "Stop this tunnel"
       },
       {
+        "command": "sshMultiConnect.keepTunnel",
+        "icon": "$(save)",
+        "title": "Keep This Tunnel",
+        "tooltip": "Save the tunnel to ssh_config so it opens on every connect"
+      },
+      {
         "command": "sshMultiConnect.removeTunnel",
         "icon": "$(trash)",
         "title": "Remove Tunnel",
@@ -337,6 +343,11 @@
           "group": "1_state@1"
         },
         {
+          "command": "sshMultiConnect.keepTunnel",
+          "when": "viewItem == sshTunnelUp || viewItem == sshTunnelDown",
+          "group": "1_state@2"
+        },
+        {
           "command": "sshMultiConnect.removeTunnel",
           "when": "viewItem == sshTunnelUp || viewItem == sshTunnelDown",
           "group": "9_danger@1"
@@ -412,6 +423,10 @@
         },
         {
           "command": "sshMultiConnect.stopTunnel",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.keepTunnel",
           "when": "false"
         },
         {

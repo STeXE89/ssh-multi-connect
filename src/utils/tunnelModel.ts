@@ -199,3 +199,36 @@ function splitHostPort(token: string): string[] {
     fields.push(current);
     return fields;
 }
+
+/**
+ * Renders a tunnel as an ssh_config directive value.
+ *
+ * The inverse of `parseForwardSpec`, in the whitespace form `ssh_config`
+ * documents. An IPv6 literal is bracketed so the port stays readable.
+ *
+ * @param config The tunnel.
+ * @returns The value for a `LocalForward` or `RemoteForward` line.
+ */
+export function forwardSpec(config: TunnelConfig): string {
+    return `${bracket(config.bindAddress)}:${config.listenPort} ${bracket(config.destinationHost)}:${config.destinationPort}`;
+}
+
+/**
+ * Names the directive a tunnel is written under.
+ *
+ * @param config The tunnel.
+ * @returns `LocalForward` or `RemoteForward`.
+ */
+export function forwardDirective(config: TunnelConfig): 'LocalForward' | 'RemoteForward' {
+    return config.kind === 'local' ? 'LocalForward' : 'RemoteForward';
+}
+
+/**
+ * Brackets a bare IPv6 literal, which otherwise runs into its port.
+ *
+ * @param host The address.
+ * @returns The address as it should appear in a forward spec.
+ */
+function bracket(host: string): string {
+    return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+}

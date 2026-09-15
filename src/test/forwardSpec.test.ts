@@ -1,6 +1,13 @@
 import * as assert from 'assert';
 import { parseSshConfig, buildConnectionEntry, SSHConnection } from '../utils/sshConfig';
-import { parseForwardSpec, LOOPBACK } from '../utils/tunnelModel';
+import {
+    parseForwardSpec,
+    forwardSpec,
+    forwardDirective,
+    LOOPBACK,
+    ALL_INTERFACES,
+    TunnelConfig,
+} from '../utils/tunnelModel';
 
 suite('ssh_config: forward directives', () => {
     test('keeps every LocalForward line, not just the last', () => {
@@ -112,5 +119,50 @@ suite('parseForwardSpec', () => {
         assert.strictEqual(parseForwardSpec('8080 localhost', 'local'), undefined);
         assert.strictEqual(parseForwardSpec('1.2.3.4:8080 db:5432 extra', 'local'), undefined);
         assert.strictEqual(parseForwardSpec('a:b:1.2.3.4:8080:db:5432', 'local'), undefined);
+    });
+});
+
+suite('forwardSpec: writing a tunnel back to ssh_config', () => {
+    const config = (overrides: Partial<TunnelConfig> = {}): TunnelConfig => ({
+        id: 't1',
+        kind: 'local',
+        bindAddress: LOOPBACK,
+        listenPort: 8080,
+        destinationHost: 'localhost',
+        destinationPort: 80,
+        ...overrides,
+    });
+
+    test('names the directive by direction', () => {
+        assert.strictEqual(forwardDirective(config()), 'LocalForward');
+        assert.strictEqual(forwardDirective(config({ kind: 'remote' })), 'RemoteForward');
+    });
+
+    test('writes the whitespace form ssh_config documents', () => {
+        assert.strictEqual(forwardSpec(config()), '127.0.0.1:8080 localhost:80');
+    });
+
+    test('brackets an IPv6 literal so it does not run into its port', () => {
+        const spec = forwardSpec(config({ bindAddress: '::1', destinationHost: 'fe80::1' }));
+
+        assert.strictEqual(spec, '[::1]:8080 [fe80::1]:80');
+    });
+
+    test('round-trips through the parser, which is what reads it back', () => {
+        for (const tunnel of [
+            config(),
+            config({ kind: 'remote', bindAddress: ALL_INTERFACES, listenPort: 9090 }),
+            config({ bindAddress: '::1', destinationHost: 'fe80::1' }),
+        ]) {
+            const parsed = parseForwardSpec(forwardSpec(tunnel), tunnel.kind);
+
+            assert.deepStrictEqual(parsed, {
+                kind: tunnel.kind,
+                bindAddress: tunnel.bindAddress,
+                listenPort: tunnel.listenPort,
+                destinationHost: tunnel.destinationHost,
+                destinationPort: tunnel.destinationPort,
+            });
+        }
     });
 });

@@ -28,7 +28,14 @@ import { TunnelManager } from './tunnels';
 import { JumpChain, openJumpChain } from './proxyChain';
 import { jumpPlanFor, resolveHost, createAuthProvider, createKeyApprover } from './jumpSession';
 import { SSHTunnelTreeItem, promptForTunnel } from './tunnelUi';
-import { tunnelLabel, tunnelFlag, parseForwardSpec } from './utils/tunnelModel';
+import {
+    tunnelLabel,
+    tunnelFlag,
+    parseForwardSpec,
+    forwardSpec,
+    forwardDirective,
+    TunnelConfig,
+} from './utils/tunnelModel';
 import { FileDetailsViewProvider } from './fileDetailsView';
 import {
     collectFolderPaths,
@@ -43,6 +50,7 @@ import {
     SSH_DEFAULT_PORT,
     SSHConnection,
     insertOrUpdateConnection,
+    resolveIdentityFile,
     getAllConnections,
     removeConnection,
     createIdentityFile,
@@ -492,7 +500,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
                 return undefined;
             }
 
-            removeConnection(connection.host);
+            removeConnection(connection.host, connection.sourceFile);
             edited.id = edited.host;
         }
 
@@ -522,7 +530,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
                 this.disconnect(treeItem);
             }
 
-            removeConnection(connection.host);
+            removeConnection(connection.host, connection.sourceFile);
             void this.credentials?.forget(connection);
 
             this.connections = this.connections.filter(conn => conn.host !== connection.host);
@@ -1025,7 +1033,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
 
         let privateKey: Buffer;
         try {
-            privateKey = Buffer.from(fileUtils.readFile(identityFile));
+            privateKey = Buffer.from(fileUtils.readFile(resolveIdentityFile(identityFile)));
         } catch (error) {
             throw new Error(`Failed to read private key: ${errorMessage(error)}`);
         }
@@ -1254,6 +1262,54 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         }
 
         await this.connect(treeItem);
+    }
+
+    /**
+     * Writes a running tunnel into the host's ssh_config entry.
+     *
+     * A tunnel otherwise lives only as long as the connection. Saved as a
+     * LocalForward or RemoteForward line it is opened again on every connect,
+     * the same line `ssh -L` would honour.
+     *
+     * @param connectionId The connection the tunnel belongs to.
+     * @param config The tunnel to keep.
+     */
+    public keepTunnel(connectionId: string, config: TunnelConfig): void {
+        const connection = this.connections.find(conn => conn.id === connectionId);
+        if (!connection) {
+            return;
+        }
+
+        const directive = forwardDirective(config);
+        const spec = forwardSpec(config);
+        const field = config.kind === 'local' ? 'localForward' : 'remoteForward';
+        const existing = connection[field] ?? [];
+
+        // Compare what the specs mean, not how they were written: the same
+        // tunnel can be spelled several ways.
+        const already = existing.some(written => {
+            const parsed = parseForwardSpec(written, config.kind);
+            return (
+                parsed &&
+                parsed.bindAddress === config.bindAddress &&
+                parsed.listenPort === config.listenPort &&
+                parsed.destinationHost === config.destinationHost &&
+                parsed.destinationPort === config.destinationPort
+            );
+        });
+
+        if (already) {
+            vscode.window.showInformationMessage(`${connection.host} already opens ${tunnelLabel(config)} on connect.`);
+            return;
+        }
+
+        insertOrUpdateConnection({ ...connection, [field]: [...existing, spec] });
+        this.loadSSHConnections();
+        this.refresh();
+
+        vscode.window.showInformationMessage(
+            `Saved as "${directive} ${spec}" for ${connection.host}. It opens on every connect.`
+        );
     }
 
     public refresh(): void {

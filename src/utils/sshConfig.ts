@@ -30,6 +30,17 @@ export interface SSHConnection {
     serverAliveCountMax?: number;
     logLevel?: string;
     vFolderTag?: string;
+    /**
+     * The file this host was read from, which is not always the main config:
+     * an `Include`d host must be written back where it came from. Never
+     * serialised.
+     */
+    sourceFile?: string;
+    /**
+     * Set when the host's block pulls in another file, so rewriting it from
+     * the model would drop the `Include` line. Never serialised.
+     */
+    readOnly?: boolean;
 }
 
 /** A `Host` line plus every line up to the next `Host` line. */

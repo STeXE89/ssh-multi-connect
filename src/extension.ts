@@ -247,6 +247,10 @@ function registerCommands(
             callback: (item: SSHTunnelTreeItem) => tunnels.stop(item.connectionId, item.entry.config.id),
         },
         {
+            command: 'sshMultiConnect.keepTunnel',
+            callback: (item: SSHTunnelTreeItem) => sshViewProvider.keepTunnel(item.connectionId, item.entry.config),
+        },
+        {
             command: 'sshMultiConnect.removeTunnel',
             callback: (item: SSHTunnelTreeItem) => tunnels.remove(item.connectionId, item.entry.config.id),
         },
