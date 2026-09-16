@@ -16,15 +16,25 @@ export class RemoteFilesView implements vscode.TreeDataProvider<vscode.TreeItem>
     private delegateSubscription?: vscode.Disposable;
 
     /**
-     * @param onSelect Called with the item selected in the tree.
+     * @param onSelect Called with everything selected in the tree.
+     * @param dragAndDrop Builds the controller for files dropped onto the
+     * tree. It is passed this view, so it can read whichever provider is
+     * current at the moment of the drop.
      */
-    constructor(onSelect: (item: vscode.TreeItem) => void) {
-        this.treeView = vscode.window.createTreeView('remoteFilesView', { treeDataProvider: this });
+    constructor(
+        onSelect: (selection: readonly vscode.TreeItem[]) => void,
+        dragAndDrop?: (view: RemoteFilesView) => vscode.TreeDragAndDropController<vscode.TreeItem>
+    ) {
+        this.treeView = vscode.window.createTreeView('remoteFilesView', {
+            treeDataProvider: this,
+            dragAndDropController: dragAndDrop?.(this),
+            // Several entries can be dragged or acted on at once.
+            canSelectMany: true,
+        });
 
         this.treeView.onDidChangeSelection(event => {
-            const [selected] = event.selection;
-            if (selected) {
-                onSelect(selected);
+            if (event.selection.length > 0) {
+                onSelect(event.selection);
             }
         });
     }
@@ -34,6 +44,11 @@ export class RemoteFilesView implements vscode.TreeDataProvider<vscode.TreeItem>
      *
      * @param provider The provider to show, or undefined to empty the tree.
      */
+    /** The provider currently backing the tree. */
+    get provider(): vscode.TreeDataProvider<vscode.TreeItem> | undefined {
+        return this.delegate;
+    }
+
     setProvider(provider: vscode.TreeDataProvider<vscode.TreeItem> | undefined): void {
         this.delegateSubscription?.dispose();
         this.delegateSubscription = undefined;

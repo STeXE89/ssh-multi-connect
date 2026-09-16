@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Client, ClientChannel } from 'ssh2';
+import { CWD_REPORT_SETUP, CwdScanner } from './utils/terminalCwd';
 
 /** Fallback terminal size used before VS Code reports real dimensions. */
 const DEFAULT_ROWS = 24;
@@ -15,14 +16,26 @@ const DEFAULT_COLUMNS = 80;
 export class SSHPseudoterminal implements vscode.Pseudoterminal {
     private readonly writeEmitter = new vscode.EventEmitter<string>();
     private readonly closeEmitter = new vscode.EventEmitter<number | void>();
+    private readonly directoryEmitter = new vscode.EventEmitter<string>();
 
     readonly onDidWrite: vscode.Event<string> = this.writeEmitter.event;
     readonly onDidClose: vscode.Event<number | void> = this.closeEmitter.event;
 
+    /** Fires with the shell's working directory whenever it reports one. */
+    readonly onDidChangeDirectory: vscode.Event<string> = this.directoryEmitter.event;
+
     private channel?: ClientChannel;
     private closed = false;
+    private readonly scanner = new CwdScanner();
 
-    constructor(private readonly client: Client) {}
+    /**
+     * @param client The connection to open a shell on.
+     * @param reportDirectory Whether to ask the shell to report where it is.
+     */
+    constructor(
+        private readonly client: Client,
+        private readonly reportDirectory = false
+    ) {}
 
     /**
      * Opens the remote shell channel once VS Code shows the terminal.
@@ -48,12 +61,29 @@ export class SSHPseudoterminal implements vscode.Pseudoterminal {
 
             this.channel = channel;
 
-            channel.on('data', (data: Buffer) => this.writeEmitter.fire(data.toString('utf-8')));
+            channel.on('data', (data: Buffer) => {
+                const text = data.toString('utf-8');
+
+                // The sequences stay in the stream: the terminal knows what to
+                // do with them, and stripping them risks cutting real output.
+                for (const directory of this.scanner.push(text)) {
+                    this.directoryEmitter.fire(directory);
+                }
+
+                this.writeEmitter.fire(text);
+            });
             channel.stderr.on('data', (data: Buffer) => this.writeEmitter.fire(data.toString('utf-8')));
             channel.on('close', () => this.closeEmitter.fire());
             channel.on('error', (channelError: Error) =>
                 this.writeEmitter.fire(`\r\nRemote shell error: ${channelError.message}\r\n`)
             );
+
+            if (this.reportDirectory) {
+                // Asked for once, before the first prompt, so the shell reports
+                // where it is from then on. Most shells report nothing unless
+                // told to, which is why this cannot be passive.
+                channel.write(`${CWD_REPORT_SETUP}\n`);
+            }
         });
     }
 
@@ -62,6 +92,7 @@ export class SSHPseudoterminal implements vscode.Pseudoterminal {
         this.closed = true;
         this.channel?.end();
         this.channel = undefined;
+        this.directoryEmitter.dispose();
     }
 
     /**

@@ -5,6 +5,9 @@ import * as fileUtils from './utils/fileUtils';
 import * as sftpUtils from './utils/sftpUtils';
 import * as fs from 'fs';
 import { quote } from './utils/shell';
+import { describeUpload } from './utils/dropTargets';
+import { MoveSource, describeMove, planMove } from './utils/remoteMove';
+import { planUpload, describeSkipped } from './utils/uploadPlan';
 import { PrivilegeEscalation, isPermissionDenied, sudoCommands } from './utils/privilege';
 import {
     FileDetailsViewProvider,
@@ -13,7 +16,9 @@ import {
     formatBytes,
     renderDetails,
     renderEditor,
+    renderSelection,
 } from './fileDetailsView';
+import { SelectedEntry, summariseSelection } from './utils/selectionSummary';
 import { ExtendedSSHConnection } from './sshConnection';
 
 /** Extracts a readable message from an unknown thrown value. */
@@ -133,6 +138,11 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         return new RemoteFileProvider(connection, currentPath);
     }
 
+    /** The connection whose files this provider serves. */
+    public get connectionId(): string {
+        return this.connection.id;
+    }
+
     public static removeProviderByConnectionId(connectionId: string): void {
         RemoteFileProvider.connectionProviders.delete(connectionId);
     }
@@ -250,18 +260,115 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         }
 
         const remotePath = `${node.resourceUri.path}/${fileName}`;
+
+        if (!(await this.ensureSftp())) {
+            return;
+        }
+
+        const created = await this.attempt(
+            `create ${remotePath}`,
+            () => sftpUtils.createRemoteFile(this.sftp, remotePath),
+            () => this.elevation.runOrThrow(sudoCommands.touch(remotePath)).then(() => undefined)
+        );
+
+        if (!created) {
+            return;
+        }
+
+        vscode.window.showInformationMessage(`File created: ${remotePath}`);
+        this.refresh();
+
+        await this.openRemoteFile(this.createResourceUri(node.resourceUri.path, fileName));
+    }
+
+    /**
+     * Opens the SFTP session if it is not open yet.
+     *
+     * @returns True when there is a session to work with.
+     */
+    private async ensureSftp(): Promise<boolean> {
+        if (this.sftp) {
+            return true;
+        }
+
+        if (!this.connection.client) {
+            vscode.window.showErrorMessage(`Connect to ${this.connection.host} first.`);
+            return false;
+        }
+
+        try {
+            this.sftp = await sftpUtils.getSFTPClient(this.connection.client);
+            return true;
+        } catch (error) {
+            vscode.window.showErrorMessage(`Could not open an SFTP session: ${errorText(error)}`);
+            return false;
+        }
+    }
+
+    /** The folder shown at the top of this connection's tree. */
+    public get rootPath(): string {
+        return this.currentPath;
+    }
+
+    /**
+     * Uploads local files and folders into a remote folder.
+     *
+     * The whole transfer is worked out first, so the progress bar can count
+     * files rather than appear to stall on a deep tree.
+     *
+     * @param destination The remote folder to upload into.
+     * @param localPaths The files and folders dragged in.
+     */
+    public async upload(destination: string, localPaths: string[]): Promise<void> {
+        if (localPaths.length === 0) {
+            return;
+        }
+
+        if (!this.connection.client) {
+            vscode.window.showErrorMessage('Connect to the host before uploading files.');
+            return;
+        }
+
         try {
             if (!this.sftp) {
-                this.sftp = await sftpUtils.getSFTPClient(this.connection.client!);
+                this.sftp = await sftpUtils.getSFTPClient(this.connection.client);
             }
-            await sftpUtils.createRemoteFile(this.sftp, remotePath);
-            vscode.window.showInformationMessage(`File created: ${remotePath}`);
+
+            const plan = await planUpload(localPaths, destination);
+            const files = plan.steps.filter(step => step.kind === 'file');
+
+            await vscode.window.withProgress(
+                { location: vscode.ProgressLocation.Notification, title: describeUpload(localPaths, destination) },
+                async (progress, token) => {
+                    let done = 0;
+                    for (const step of plan.steps) {
+                        if (token.isCancellationRequested) {
+                            return;
+                        }
+
+                        if (step.kind === 'directory') {
+                            // Already there is the normal case when adding to
+                            // an existing tree, and is not a failure.
+                            await sftpUtils.createRemoteDirectory(this.sftp, step.remotePath).catch(() => undefined);
+                            continue;
+                        }
+
+                        progress.report({ message: `${++done}/${files.length} ${step.remotePath}` });
+                        await sftpUtils.uploadRemoteFile(this.sftp, step.localPath, step.remotePath);
+                    }
+                }
+            );
+
             this.refresh();
 
-            const resourceUri = this.createResourceUri(node.resourceUri.path, fileName);
-            await this.openRemoteFile(resourceUri);
+            const skipped = describeSkipped(plan);
+            if (skipped) {
+                vscode.window.showWarningMessage(`Uploaded to ${destination}, skipping ${skipped}.`);
+            } else {
+                vscode.window.showInformationMessage(`Uploaded ${files.length} file(s) to ${destination}.`);
+            }
         } catch (error: any) {
-            vscode.window.showErrorMessage(`Error creating file: ${error.message}`);
+            vscode.window.showErrorMessage(`Upload to ${destination} failed: ${error.message}`);
         }
     }
 
@@ -272,15 +379,20 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         }
 
         const remotePath = `${node.resourceUri.path}/${folderName}`;
-        try {
-            if (!this.sftp) {
-                this.sftp = await sftpUtils.getSFTPClient(this.connection.client!);
-            }
-            await sftpUtils.createRemoteDirectory(this.sftp, remotePath);
+
+        if (!(await this.ensureSftp())) {
+            return;
+        }
+
+        const created = await this.attempt(
+            `create ${remotePath}`,
+            () => sftpUtils.createRemoteDirectory(this.sftp, remotePath),
+            () => this.elevation.runOrThrow(sudoCommands.mkdir(remotePath)).then(() => undefined)
+        );
+
+        if (created) {
             vscode.window.showInformationMessage(`Folder created: ${remotePath}`);
             this.refresh();
-        } catch (error: any) {
-            vscode.window.showErrorMessage(`Error creating folder: ${error.message}`);
         }
     }
 
@@ -533,23 +645,16 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
      *
      * @param node The item to delete.
      */
-    public async deleteItem(node: RemoteFileTreeItem): Promise<void> {
-        const remotePath = node.resourceUri.path;
-        const name = path.posix.basename(remotePath);
-
-        if (!this.sftp) {
-            this.sftp = await sftpUtils.getSFTPClient(this.connection.client!);
-        }
-
-        let detail = `${remotePath} on ${this.connection.host}`;
-        if (node.isDirectory) {
-            const contained = await sftpUtils.countRemoteEntries(this.sftp, remotePath);
-            detail += contained > 0 ? `\n\nThis folder and the ${contained} item(s) inside it will be deleted.` : '';
+    public async deleteItem(nodes: RemoteFileTreeItem[]): Promise<void> {
+        if (nodes.length === 0 || !(await this.ensureSftp())) {
+            return;
         }
 
         const confirmed = await vscode.window.showWarningMessage(
-            `Delete "${name}" permanently?`,
-            { modal: true, detail },
+            nodes.length === 1
+                ? `Delete "${path.posix.basename(nodes[0].resourceUri.path)}" permanently?`
+                : `Delete ${nodes.length} items permanently?`,
+            { modal: true, detail: await this.describeDeletion(nodes) },
             'Delete'
         );
 
@@ -557,17 +662,57 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
             return;
         }
 
-        const done = await this.attempt(
-            `delete ${remotePath}`,
-            () => sftpUtils.deleteRemoteEntry(this.sftp, remotePath, node.isDirectory),
-            () => this.elevation.runOrThrow(sudoCommands.remove(remotePath, node.isDirectory)).then(() => undefined)
-        );
+        let deleted = 0;
+        for (const node of nodes) {
+            const remotePath = node.resourceUri.path;
 
-        if (done) {
-            this.forgetTempFilesUnder(remotePath);
-            vscode.window.showInformationMessage(`Deleted ${remotePath}.`);
+            const done = await this.attempt(
+                `delete ${remotePath}`,
+                () => sftpUtils.deleteRemoteEntry(this.sftp, remotePath, node.isDirectory),
+                () => this.elevation.runOrThrow(sudoCommands.remove(remotePath, node.isDirectory)).then(() => undefined)
+            );
+
+            if (done) {
+                this.forgetTempFilesUnder(remotePath);
+                deleted++;
+            }
+        }
+
+        if (deleted > 0) {
+            vscode.window.showInformationMessage(`Deleted ${deleted} item${deleted === 1 ? '' : 's'}.`);
             this.refresh();
         }
+    }
+
+    /**
+     * Spells out what a delete would take with it.
+     *
+     * A folder's contents are counted, since "delete" on a full folder is the
+     * one people regret.
+     *
+     * @param nodes The entries about to be deleted.
+     * @returns The confirmation's detail text.
+     */
+    private async describeDeletion(nodes: RemoteFileTreeItem[]): Promise<string> {
+        const lines = [`On ${this.connection.host}:`];
+
+        for (const node of nodes.slice(0, 10)) {
+            const remotePath = node.resourceUri.path;
+
+            if (!node.isDirectory) {
+                lines.push(remotePath);
+                continue;
+            }
+
+            const contained = await sftpUtils.countRemoteEntries(this.sftp, remotePath).catch(() => 0);
+            lines.push(contained > 0 ? `${remotePath} and the ${contained} item(s) inside it` : remotePath);
+        }
+
+        if (nodes.length > 10) {
+            lines.push(`and ${nodes.length - 10} more`);
+        }
+
+        return lines.join('\n');
     }
 
     /**
@@ -575,6 +720,54 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
      *
      * @param node The item to rename.
      */
+    /**
+     * Moves entries into another folder on the same host.
+     *
+     * A move is a rename on the server, so it falls back to sudo the same way
+     * a rename started from the menu does.
+     *
+     * @param destination The folder they were dropped on.
+     * @param sources The entries being dragged.
+     */
+    public async moveInto(destination: string, sources: MoveSource[]): Promise<void> {
+        const plan = planMove(sources, destination);
+
+        if (plan.moves.length === 0) {
+            const reasons = plan.skipped.map(entry => `${entry.name} (${entry.reason})`).join(', ');
+            if (reasons) {
+                vscode.window.showInformationMessage(`Nothing moved: ${reasons}.`);
+            }
+            return;
+        }
+
+        if (!(await this.ensureSftp())) {
+            return;
+        }
+
+        let moved = 0;
+        await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Window, title: describeMove(plan, destination) },
+            async () => {
+                for (const move of plan.moves) {
+                    const done = await this.attempt(
+                        `move ${move.from} to ${destination}`,
+                        () => sftpUtils.renameRemote(this.sftp, move.from, move.to),
+                        () => this.elevation.runOrThrow(sudoCommands.rename(move.from, move.to)).then(() => undefined)
+                    );
+
+                    if (done) {
+                        moved++;
+                    }
+                }
+            }
+        );
+
+        if (moved > 0) {
+            this.refresh();
+            vscode.window.showInformationMessage(`Moved ${moved} entr${moved === 1 ? 'y' : 'ies'} to ${destination}.`);
+        }
+    }
+
     public async renameItem(node: RemoteFileTreeItem): Promise<void> {
         const remotePath = node.resourceUri.path;
         const currentName = path.posix.basename(remotePath);
@@ -622,9 +815,19 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
      *
      * @param node The item whose path to copy.
      */
-    public async copyPath(node: RemoteFileTreeItem): Promise<void> {
-        await vscode.env.clipboard.writeText(node.resourceUri.path);
-        vscode.window.showInformationMessage(`Copied ${node.resourceUri.path}`);
+    public async copyPath(nodes: RemoteFileTreeItem[]): Promise<void> {
+        if (nodes.length === 0) {
+            return;
+        }
+
+        // One per line, which is what a shell or an editor expects when
+        // several paths are pasted.
+        const paths = nodes.map(node => node.resourceUri.path);
+        await vscode.env.clipboard.writeText(paths.join('\n'));
+
+        vscode.window.showInformationMessage(
+            paths.length === 1 ? `Copied ${paths[0]}` : `Copied ${paths.length} paths`
+        );
     }
 
     /**
@@ -638,6 +841,42 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
                 this.tempFileMap.delete(localPath);
             }
         }
+    }
+
+    /**
+     * Shows what a selection of several entries adds up to.
+     *
+     * Each is stat'd for its size; folders are counted but not measured, since
+     * walking them on the server for every selection change would make the
+     * tree unusable.
+     *
+     * @param nodes The selected entries.
+     */
+    public async showSelectionSummary(nodes: RemoteFileTreeItem[]): Promise<void> {
+        if (!this.detailsView || !(await this.ensureSftp())) {
+            return;
+        }
+
+        const entries: SelectedEntry[] = await Promise.all(
+            nodes.map(async node => {
+                const name = path.posix.basename(node.resourceUri.path);
+
+                if (node.isDirectory) {
+                    return { name, isDirectory: true, size: 0 };
+                }
+
+                try {
+                    const stat = await sftpUtils.getRemoteStat(this.sftp, node.resourceUri.path);
+                    return { name, isDirectory: false, size: stat.size ?? 0 };
+                } catch {
+                    // An entry that vanished should not lose the whole total.
+                    return { name, isDirectory: false, size: 0 };
+                }
+            })
+        );
+
+        this.detailsView.setMessageHandler(() => undefined);
+        this.detailsView.show(renderSelection(summariseSelection(entries)));
     }
 
     public async showDetails(node: RemoteFileTreeItem): Promise<void> {

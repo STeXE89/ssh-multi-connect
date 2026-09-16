@@ -18,15 +18,29 @@ export interface SSHConnection {
     user?: string;
     port?: number;
     identityFile?: string;
+    /** Comma-separated bastion hops, as written by `ssh -J`. */
+    proxyJump?: string;
     proxyCommand?: string;
     forwardAgent?: boolean;
-    localForward?: string;
-    remoteForward?: string;
+    /** ssh_config allows several of these per host, so each is a list. */
+    localForward?: string[];
+    remoteForward?: string[];
     compression?: boolean;
     serverAliveInterval?: number;
     serverAliveCountMax?: number;
     logLevel?: string;
     vFolderTag?: string;
+    /**
+     * The file this host was read from, which is not always the main config:
+     * an `Include`d host must be written back where it came from. Never
+     * serialised.
+     */
+    sourceFile?: string;
+    /**
+     * Set when the host's block pulls in another file, so rewriting it from
+     * the model would drop the `Include` line. Never serialised.
+     */
+    readOnly?: boolean;
 }
 
 /** A `Host` line plus every line up to the next `Host` line. */
@@ -175,6 +189,9 @@ function applyDirective(connection: SSHConnection, key: string, rawValue: string
         case 'identityfile':
             connection.identityFile = value;
             break;
+        case 'proxyjump':
+            connection.proxyJump = value;
+            break;
         case 'proxycommand':
             connection.proxyCommand = value;
             break;
@@ -182,10 +199,10 @@ function applyDirective(connection: SSHConnection, key: string, rawValue: string
             connection.forwardAgent = value.toLowerCase() === 'yes';
             break;
         case 'localforward':
-            connection.localForward = value;
+            connection.localForward = [...(connection.localForward ?? []), value];
             break;
         case 'remoteforward':
-            connection.remoteForward = value;
+            connection.remoteForward = [...(connection.remoteForward ?? []), value];
             break;
         case 'compression':
             connection.compression = value.toLowerCase() === 'yes';
@@ -277,10 +294,11 @@ export function buildConnectionEntry(connection: SSHConnection): string {
         connection.user ? `  User ${connection.user}` : null,
         connection.port ? `  Port ${connection.port}` : null,
         connection.identityFile ? `  IdentityFile ${connection.identityFile}` : null,
+        connection.proxyJump ? `  ProxyJump ${connection.proxyJump}` : null,
         connection.proxyCommand ? `  ProxyCommand ${connection.proxyCommand}` : null,
         connection.forwardAgent !== undefined ? `  ForwardAgent ${connection.forwardAgent ? 'yes' : 'no'}` : null,
-        connection.localForward ? `  LocalForward ${connection.localForward}` : null,
-        connection.remoteForward ? `  RemoteForward ${connection.remoteForward}` : null,
+        ...(connection.localForward ?? []).map(spec => `  LocalForward ${spec}`),
+        ...(connection.remoteForward ?? []).map(spec => `  RemoteForward ${spec}`),
         connection.compression !== undefined ? `  Compression ${connection.compression ? 'yes' : 'no'}` : null,
         connection.serverAliveInterval ? `  ServerAliveInterval ${connection.serverAliveInterval}` : null,
         connection.serverAliveCountMax ? `  ServerAliveCountMax ${connection.serverAliveCountMax}` : null,

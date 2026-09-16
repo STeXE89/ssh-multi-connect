@@ -5,6 +5,7 @@ import {
     describeTarget,
     connectionTooltip,
     activeConnectionBadge,
+    connectionPicks,
     ExtendedSSHConnection,
 } from '../sshConnection';
 
@@ -151,5 +152,55 @@ suite('activity bar badge', () => {
 
         assert.strictEqual(badge?.value, 3);
         assert.match(badge?.tooltip ?? '', /^3 active SSH connections$/);
+    });
+});
+
+suite('connectionPicks', () => {
+    test('offers live connections before idle ones', () => {
+        const picks = connectionPicks([
+            connection({ host: 'idle' }),
+            connection({ host: 'live', client: {} as never }),
+        ]);
+
+        assert.deepStrictEqual(
+            picks.map(pick => pick.label),
+            ['Connected', '$(vm-active) live', 'Not connected', '$(vm-outline) idle']
+        );
+    });
+
+    test('sorts by host within a group', () => {
+        const picks = connectionPicks([
+            connection({ host: 'c' }),
+            connection({ host: 'a' }),
+            connection({ host: 'b' }),
+        ]);
+
+        assert.deepStrictEqual(
+            picks.filter(pick => pick.connection).map(pick => pick.connection?.host),
+            ['a', 'b', 'c']
+        );
+    });
+
+    test('omits a group that has no members', () => {
+        const picks = connectionPicks([connection({ host: 'idle' })]);
+
+        assert.deepStrictEqual(
+            picks.map(pick => pick.label),
+            ['Not connected', '$(vm-outline) idle']
+        );
+    });
+
+    test('shows the target and the folder without putting them in the label', () => {
+        const [, pick] = connectionPicks([connection({ user: 'root', vFolderTag: 'prod/eu' })]);
+
+        assert.strictEqual(pick.label, '$(vm-outline) web');
+        assert.strictEqual(pick.description, 'root@10.0.0.5');
+        assert.strictEqual(pick.detail, '$(folder) prod/eu');
+    });
+
+    test('separators carry no connection, so they cannot be picked', () => {
+        const [separator] = connectionPicks([connection()]);
+
+        assert.strictEqual(separator.connection, undefined);
     });
 });

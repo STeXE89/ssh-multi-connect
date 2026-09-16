@@ -14,6 +14,15 @@ This extension 'ssh-multi-connect' allows you to group SSH connections into fold
 - Inspect remote files and folders, and edit their permissions and ownership.
 - Create, rename and delete remote files and folders from the right-click menu.
 - Retry an operation with sudo when the remote user lacks permission.
+- Run one command across hosts and read the collected output in one report.
+- Upload files and folders by dragging them onto the remote tree, or by picking them.
+- Move remote files and folders by dragging them within the tree.
+- Select several remote entries to move, copy, download, or delete them together.
+- Copy a file or folder from one host to one or more others, connecting them if needed.
+- Download a remote file or folder onto this machine.
+- Keep a tunnel in `ssh_config` so it opens on every connect.
+- Reach hosts behind a bastion, with `ProxyJump`, set from the connection's right-click menu.
+- Connect from the command palette with **Connect to SSH Host...**.
 - Runs on Windows, macOS and Linux.
 
 ## Requirements
@@ -55,14 +64,108 @@ reaches the remote host.
 your machine can see. The server needs `AllowTcpForwarding yes`, plus
 `GatewayPorts yes` to bind anything other than its own localhost.
 
+## Hosts behind a bastion
+
+A host reached through a jump server is configured the way `ssh` configures it:
+
+```
+Host db
+  HostName 10.0.0.5
+  ProxyJump jump@bastion.example.com
+```
+
+Set it when adding a connection, with **Edit Connection...** on an existing
+one, or by writing it in `~/.ssh/config` directly. Connecting then asks for
+each hop's credentials in turn, and every prompt names the account it is for
+and where the chain is going, so the jump host cannot be mistaken for the
+destination. Each hop is a real SSH connection carried inside the previous one, so no
+external `ssh` process is involved. Chains of several hops work, and each hop
+can have its own `Host` block for its user, port and key. Because a jumped host
+cannot be reached by `ssh-keyscan`, its host key is checked during the
+handshake instead: an unknown key is recorded, and a changed one stops the
+connection until you accept it.
+
+A `ProxyCommand` is honoured when it is a jump written the long way
+(`ssh -W %h:%p bastion`, or the older `ssh bastion nc %h %p`). Anything else is
+reported rather than run.
+
+## Port forwards from ssh_config
+
+`LocalForward` and `RemoteForward` entries open as tunnels when the host
+connects, as `ssh` opens them, and appear in the tree where they can be stopped
+and restarted.
+
+## Reading ssh_config
+
+The host list is your `~/.ssh/config`, read the way `ssh` reads it:
+`Include` directives are followed, globs and all, and a leading `~` in a path
+is expanded. A host defined in an included file is written back to that file,
+not copied into the main config. A block that itself contains an `Include` is
+left alone by the editor, since rewriting it would drop that line.
+
 ## Extension Settings
 
 This extension contributes the following settings:
 
-* `sshMultiConnect.followPathInTerminal` (default `false`): change the connection's
-  terminal to the directory you select in **Remote Files**. Selecting a file uses its
-  parent folder. The `cd` is typed into the terminal, so it can disturb a command that
-  is already running there; it is only sent when the directory actually changes.
+### Keeping the tree and the terminal together
+
+The two directions are separate settings, both off by default, and both can be on at
+once -- they will not chase each other.
+
+* `sshMultiConnect.followPathInTerminal` (default `false`): **tree to terminal**.
+  Selecting a folder in **Remote Files** types a `cd` into that connection's terminal,
+  exactly as if you had typed it, and only when the folder actually changes. Selecting
+  a file uses the folder holding it.
+
+  Because it is typed, it goes wherever that terminal's input goes: if a program is
+  running there -- an editor, `top`, `less` -- or a command is half typed, the `cd`
+  lands in that instead. It reaches the connection's own terminal, not the split group
+  the multi-command panel opens. Every shell understands `cd`, so this one works on
+  all of them.
+
+* `sshMultiConnect.followTerminalDirectory` (default `false`): **terminal to tree**.
+  Every terminal opened from then on runs one setup line as it starts, which makes the
+  shell report its folder before each prompt; the tree then follows. You will see that
+  line in the terminal, and the shell carries an extra function on `PROMPT_COMMAND`
+  (bash) or in `precmd_functions` (zsh) until it exits. Terminals already open are not
+  touched -- reopen one to have it report.
+
+  The tree follows any change the shell reports, including one made by a script, by
+  `pushd`, or by a `cd` inside a command you ran. **Only bash and zsh can report**:
+  on dash, ash, fish, csh and anything else the setup line does nothing at all,
+  silently, and the tree will not follow.
+
+* `sshMultiConnect.splitTerminalsForMultiCommand` (default `true`): send a
+  multi-host command to a split terminal group, one pane per selected host, so every
+  host's output is visible at once. These are terminals the panel opens itself, a
+  second shell on each connection; closing one does not disconnect the host. Turn it
+  off to send to each connection's own terminal instead.
+
+* `sshMultiConnect.autoReconnect` (default `true`): rebuild a connection that
+  drops, without asking for its password again. Suspending the machine is the usual
+  cause: the link is gone, but nothing notices until something writes to it, so the
+  host sits there looking connected. Reconnection reuses the credentials already held
+  for this session and reopens the tunnels that were running; a host whose password
+  was never typed this session is left alone rather than prompting at an unattended
+  screen.
+
+* `sshMultiConnect.keepaliveInterval` (default `30`): seconds between keepalive
+  probes on connections whose `ssh_config` entry does not set `ServerAliveInterval`.
+  Three missed probes end the connection, so the default notices a drop in about 90
+  seconds. 0 disables probing.
+
+* `sshMultiConnect.suggestVersionChannel` (default `true`): offer to move between
+  the release and pre-release versions of this extension when the other one has more
+  to give. At most once a day the marketplace is asked which versions exist: on a
+  pre-release whose stable line has caught up you are offered the release, and on a
+  release you are offered a pre-release that is genuinely ahead. Only this extension's
+  identifier is sent, a failure is silent, and a version you turn down is not offered
+  again.
+
+* `sshMultiConnect.savePasswords` (default `false`): keep the passwords you type in
+  the operating system's keychain, so a host does not ask again. While it is off, a
+  password is only held in memory for the life of the connection. **Forget Saved
+  Password** on a connection discards one.
 
 ## Known Issues
 
@@ -76,6 +179,38 @@ This extension contributes the following settings:
 ## Release Notes
 
 Below some last release note, for more details see the CHANGELOG.md
+
+## [0.0.10] - 2026/09/16
+
+### Added
+
+- Hosts behind a bastion, through `ProxyJump` and the `ProxyCommand` forms that mean the same thing.
+- `LocalForward` and `RemoteForward` entries open as tunnels on connect.
+- `ServerAliveInterval`, `ServerAliveCountMax`, `Compression` and `ForwardAgent` are honoured.
+- **Connect to SSH Host...** in the command palette, listing every host with the live ones first.
+- **Edit Connection...** on a host, for its address, user, port, jump hosts and key.
+- Jump hosts can be set when adding a connection, and each credential prompt names the host asking.
+- Optional password storage in the operating system's keychain, off by default.
+- Drag files and folders from the desktop or the explorer onto **Remote Files** to upload them.
+- **Copy to Host...** on a remote file or folder, copying it to one or more other hosts.
+- **Upload...** on a remote folder, or in the **Remote Files** title bar, picking local files or a folder to send.
+- Dragging a remote file or folder onto another folder moves it.
+- Several remote entries can be selected at once, to move, copy, download or delete together; the File Details panel shows how many and how much.
+- **Download...** on a remote file or folder, saving it onto this machine.
+- **Keep This Tunnel** writes a running tunnel to `ssh_config`, so it opens on every connect.
+- **Remote Files** can follow the terminal's directory, the other direction of the existing setting.
+- An offer to move between the release and pre-release versions when the other channel has more to give.
+- Connections that drop are rebuilt on their own, reusing this session's credentials and reopening the tunnels that were running.
+- **Run Command on Hosts...** runs one command on several hosts and opens a report, grouping the hosts that agree.
+- The multi-command panel shows the selected hosts side by side in a split terminal group.
+
+### Fixed
+
+- `IdentityFile ~/.ssh/id_ed25519` failed, because a leading `~` was never expanded.
+- Hosts defined in files pulled in with `Include` were invisible.
+- Disconnecting a host left its remote file list on screen when another host was selected.
+- Creating a remote file or folder where the user lacks permission reported the error without offering sudo, unlike every other file operation.
+- A connection killed by suspending the machine stayed in the tree looking live, since nothing probed it and nothing watched for it closing.
 
 ## [0.0.9] - 2026/09/09
 

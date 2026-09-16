@@ -130,3 +130,105 @@ export function tunnelFlag(config: TunnelConfig): string {
 export function conflictsWith(a: TunnelConfig, b: TunnelConfig): boolean {
     return a.kind === b.kind && a.listenPort === b.listenPort && a.bindAddress === b.bindAddress;
 }
+
+/**
+ * Parses one `LocalForward`/`RemoteForward` value from ssh_config.
+ *
+ * OpenSSH accepts `[bind_address:]port host:hostport`, and also tolerates the
+ * colon-joined `-L` form (`[bind:]port:host:hostport`), so both are read here.
+ * IPv6 literals are written in brackets, which are stripped from the result:
+ * the rest of the extension stores bare addresses.
+ *
+ * A `RemoteForward` with no destination asks for dynamic (SOCKS) forwarding,
+ * which this extension does not implement, so it is rejected rather than
+ * guessed at.
+ *
+ * @param spec The directive's value.
+ * @param kind Which directive it came from.
+ * @returns The tunnel, without an id, or undefined when the spec is unusable.
+ */
+export function parseForwardSpec(spec: string, kind: TunnelKind): Omit<TunnelConfig, 'id'> | undefined {
+    const words = spec.trim().split(/\s+/).filter(Boolean);
+    const parts =
+        words.length === 1 ? splitHostPort(words[0]) : [...splitHostPort(words[0]), ...splitHostPort(words[1])];
+
+    // Either [bind, port, host, hostport] or [port, host, hostport].
+    if (words.length > 2 || parts.length < 3 || parts.length > 4) {
+        return undefined;
+    }
+
+    const [bindAddress, listenText, destinationHost, destinationText] =
+        parts.length === 4 ? parts : [LOOPBACK, ...parts];
+
+    const listenPort = parsePort(listenText, true);
+    const destinationPort = parsePort(destinationText);
+    if (listenPort === undefined || destinationPort === undefined) {
+        return undefined;
+    }
+    if (!bindAddress || validateHost(destinationHost) !== undefined) {
+        return undefined;
+    }
+
+    return { kind, bindAddress, listenPort, destinationHost, destinationPort };
+}
+
+/**
+ * Splits a token on colons, keeping a bracketed IPv6 literal whole.
+ *
+ * @param token One whitespace-delimited piece of a forward spec.
+ * @returns Its colon-separated fields, with IPv6 brackets removed.
+ */
+function splitHostPort(token: string): string[] {
+    const fields: string[] = [];
+    let current = '';
+    let inBrackets = false;
+
+    for (const char of token) {
+        if (char === '[') {
+            inBrackets = true;
+        } else if (char === ']') {
+            inBrackets = false;
+        } else if (char === ':' && !inBrackets) {
+            fields.push(current);
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+
+    fields.push(current);
+    return fields;
+}
+
+/**
+ * Renders a tunnel as an ssh_config directive value.
+ *
+ * The inverse of `parseForwardSpec`, in the whitespace form `ssh_config`
+ * documents. An IPv6 literal is bracketed so the port stays readable.
+ *
+ * @param config The tunnel.
+ * @returns The value for a `LocalForward` or `RemoteForward` line.
+ */
+export function forwardSpec(config: TunnelConfig): string {
+    return `${bracket(config.bindAddress)}:${config.listenPort} ${bracket(config.destinationHost)}:${config.destinationPort}`;
+}
+
+/**
+ * Names the directive a tunnel is written under.
+ *
+ * @param config The tunnel.
+ * @returns `LocalForward` or `RemoteForward`.
+ */
+export function forwardDirective(config: TunnelConfig): 'LocalForward' | 'RemoteForward' {
+    return config.kind === 'local' ? 'LocalForward' : 'RemoteForward';
+}
+
+/**
+ * Brackets a bare IPv6 literal, which otherwise runs into its port.
+ *
+ * @param host The address.
+ * @returns The address as it should appear in a forward spec.
+ */
+function bracket(host: string): string {
+    return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+}

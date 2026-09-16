@@ -228,3 +228,21 @@ suite('privilege: running a sudo command', () => {
         assert.strictEqual((escalation as unknown as { password?: string }).password, undefined);
     });
 });
+
+suite('sudoCommands: creating entries', () => {
+    test('builds the commands create falls back to', () => {
+        assert.strictEqual(sudoCommands.mkdir('/srv/new'), "mkdir -- '/srv/new'");
+        assert.strictEqual(sudoCommands.touch('/srv/new.txt'), "touch -- '/srv/new.txt'");
+    });
+
+    test('quotes a path that would otherwise be read as shell syntax', () => {
+        const command = sudoCommands.mkdir("/srv/'; rm -rf /");
+
+        assert.ok(!command.includes('rm -rf /;'));
+        assert.ok(command.startsWith('mkdir -- '));
+    });
+
+    test('uses -- so a name starting with a dash is not read as a flag', () => {
+        assert.ok(sudoCommands.touch('/srv/-rf').includes('-- '));
+    });
+});

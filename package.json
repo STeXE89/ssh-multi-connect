@@ -13,7 +13,7 @@
     "type": "git",
     "url": "https://github.com/STeXE89/ssh-multi-connect.git"
   },
-  "version": "0.0.9",
+  "version": "0.0.10",
   "publisher": "STeXE89",
   "engines": {
     "vscode": "^1.96.0"
@@ -32,6 +32,24 @@
         "tooltip": "Add SSH Connection"
       },
       {
+        "command": "sshMultiConnect.forgetPassword",
+        "icon": "$(key)",
+        "title": "Forget Saved Password",
+        "tooltip": "Discard the password saved for this host"
+      },
+      {
+        "command": "sshMultiConnect.runOnHosts",
+        "icon": "$(run-all)",
+        "title": "Run Command on Hosts...",
+        "tooltip": "Run one command on several hosts and collect the output"
+      },
+      {
+        "command": "sshMultiConnect.quickConnect",
+        "icon": "$(plug)",
+        "title": "Connect to SSH Host...",
+        "tooltip": "Pick an SSH connection to open"
+      },
+      {
         "command": "sshMultiConnect.connect",
         "icon": "$(terminal)",
         "title": "Connect to SSH",
@@ -42,6 +60,12 @@
         "icon": "$(stop)",
         "title": "Disconnect from SSH",
         "tooltip": "Disconnect from SSH"
+      },
+      {
+        "command": "sshMultiConnect.editConnection",
+        "icon": "$(edit)",
+        "title": "Edit Connection...",
+        "tooltip": "Change this connection's address, user, port, jump hosts or key"
       },
       {
         "command": "sshMultiConnect.removeConnection",
@@ -98,6 +122,24 @@
         "tooltip": "Delete"
       },
       {
+        "command": "sshMultiConnect.uploadToRemote",
+        "icon": "$(cloud-upload)",
+        "title": "Upload...",
+        "tooltip": "Send local files or a folder to this folder"
+      },
+      {
+        "command": "sshMultiConnect.downloadRemote",
+        "icon": "$(cloud-download)",
+        "title": "Download...",
+        "tooltip": "Save this file or folder onto this machine"
+      },
+      {
+        "command": "sshMultiConnect.copyToHost",
+        "icon": "$(arrow-swap)",
+        "title": "Copy to Host...",
+        "tooltip": "Copy this file or folder to another connected host"
+      },
+      {
         "command": "sshMultiConnect.copyRemotePath",
         "icon": "$(clippy)",
         "title": "Copy Path",
@@ -126,6 +168,12 @@
         "icon": "$(debug-stop)",
         "title": "Stop Tunnel",
         "tooltip": "Stop this tunnel"
+      },
+      {
+        "command": "sshMultiConnect.keepTunnel",
+        "icon": "$(save)",
+        "title": "Keep This Tunnel",
+        "tooltip": "Save the tunnel to ssh_config so it opens on every connect"
       },
       {
         "command": "sshMultiConnect.removeTunnel",
@@ -172,10 +220,41 @@
     "configuration": {
       "title": "SSH Multi Connect",
       "properties": {
+        "sshMultiConnect.splitTerminalsForMultiCommand": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Send a multi-host command to a split terminal group, one pane per selected host, so every host's output is visible at once.\n\nThese are terminals the panel opens itself, a second shell on each connection: VS Code can only place a terminal in a split group as it is created. Closing one does not disconnect the host.\n\nTurn this off to send the command to each connection's own terminal instead, as before."
+        },
+        "sshMultiConnect.autoReconnect": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Rebuild a connection that drops, without asking for its password again.\n\nThe usual cause is suspending the machine: the link is gone, but nothing notices until something writes to it, so the host sits there looking connected. Reconnection reuses the credentials already held for this session and reopens the tunnels that were running. A host whose password was never typed in this session is left alone rather than prompting at an unattended screen."
+        },
+        "sshMultiConnect.keepaliveInterval": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "markdownDescription": "Seconds between keepalive probes on connections whose `ssh_config` entry does not set `ServerAliveInterval`.\n\nWithout a probe, a dropped link is only noticed when something tries to write to it. Three missed probes end the connection, so the default notices a drop in about 90 seconds. `ServerAliveInterval` in `ssh_config` overrides this; 0 disables probing."
+        },
+        "sshMultiConnect.followTerminalDirectory": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Move **Remote Files** to the folder the connection's terminal is in \u2014 the other direction of `#sshMultiConnect.followPathInTerminal#`. Both can be on at once; they will not chase each other.\n\n**When it is on:** every terminal opened from then on runs one setup line as it starts, which makes the shell report its folder before each prompt. You will see that line in the terminal, and the shell carries an extra function on `PROMPT_COMMAND` (bash) or in `precmd_functions` (zsh) until it exits. Terminals already open are not touched; reopen one to have it report.\n\n**What you get:** the tree follows any change the shell reports, including one made by a script, by `pushd`, or by a `cd` inside a command you ran, not only a `cd` you typed yourself.\n\n**Shells:** only bash and zsh can report. On dash, ash, fish, csh and anything else the setup line does nothing at all, silently, and the tree simply will not follow."
+        },
+        "sshMultiConnect.suggestVersionChannel": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Offer to move between the release and pre-release versions of this extension when the other one has more to give.\n\n**When it is on:** at most once a day the marketplace is asked which versions exist. If you are on a pre-release and the stable release has caught up with it, you are offered the release; if you are on a release and a newer pre-release exists, you are offered that. Only this extension's identifier is sent, and a failure is silent.\n\nTurning down a particular version is remembered, so the same one is not offered twice."
+        },
+        "sshMultiConnect.savePasswords": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Keep the passwords you type in the operating system's keychain, so a host does not ask again.\n\nOff by default: while it is off, a password is only held in memory for the life of the connection. Use **Forget Saved Password** on a connection to discard one."
+        },
         "sshMultiConnect.followPathInTerminal": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Change the connection's terminal to the directory you select in **Remote Files**. Selecting a file uses its parent folder.\n\nThe `cd` is typed into the terminal, so it can disturb a command that is already running there. It is only sent when the directory actually changes."
+          "markdownDescription": "Change the connection's terminal to the folder you select in **Remote Files**. Selecting a file uses the folder holding it.\n\n**When it is on:** a `cd` is typed into that connection's terminal, exactly as if you had typed it. It is sent only when the folder actually changes, so clicking through several files in one folder sends nothing.\n\n**What to watch for:** because it is typed, it goes wherever that terminal's input goes. If a program is running there (an editor, `top`, `less`) or a command is half typed, the `cd` lands in that instead. It is sent to the connection's own terminal, not to the split group the multi-command panel opens.\n\n**Shells:** every shell understands `cd`, so this works on all of them, bash, zsh, dash, ash and fish alike."
         }
       }
     },
@@ -185,6 +264,11 @@
           "command": "sshMultiConnect.addConnection",
           "when": "view == sshConnectionsView",
           "group": "navigation"
+        },
+        {
+          "command": "sshMultiConnect.uploadToRemote",
+          "when": "view == remoteFilesView && sshConnectionActive",
+          "group": "navigation@0"
         },
         {
           "command": "sshMultiConnect.refreshRemoteFiles",
@@ -209,6 +293,11 @@
           "group": "inline"
         },
         {
+          "command": "sshMultiConnect.editConnection",
+          "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
+          "group": "1_edit@0"
+        },
+        {
           "command": "sshMultiConnect.removeConnection",
           "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
           "group": "inline"
@@ -219,38 +308,57 @@
           "group": "inline"
         },
         {
+          "command": "sshMultiConnect.forgetPassword",
+          "when": "config.sshMultiConnect.savePasswords && (viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected)"
+        },
+        {
           "command": "sshMultiConnect.createRemoteFile",
-          "when": "viewItem == remoteDirectory",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory)",
           "group": "inline@1"
         },
         {
           "command": "sshMultiConnect.createRemoteFolder",
-          "when": "viewItem == remoteDirectory",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory)",
           "group": "inline@2"
         },
         {
+          "command": "sshMultiConnect.copyToHost",
+          "when": "viewItem == remoteFile || viewItem == remoteDirectory",
+          "group": "6_transfer@0"
+        },
+        {
+          "command": "sshMultiConnect.uploadToRemote",
+          "when": "!listMultiSelection && (viewItem == remoteFile || viewItem == remoteDirectory)",
+          "group": "6_transfer@2"
+        },
+        {
+          "command": "sshMultiConnect.downloadRemote",
+          "when": "viewItem == remoteFile || viewItem == remoteDirectory",
+          "group": "6_transfer@1"
+        },
+        {
           "command": "sshMultiConnect.openRemoteFile",
-          "when": "viewItem == remoteFile",
+          "when": "!listMultiSelection && (viewItem == remoteFile)",
           "group": "1_open@1"
         },
         {
           "command": "sshMultiConnect.createRemoteFile",
-          "when": "viewItem == remoteDirectory",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory)",
           "group": "2_new@1"
         },
         {
           "command": "sshMultiConnect.createRemoteFolder",
-          "when": "viewItem == remoteDirectory",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory)",
           "group": "2_new@2"
         },
         {
           "command": "sshMultiConnect.editPermissions",
-          "when": "viewItem == remoteDirectory || viewItem == remoteFile",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory || viewItem == remoteFile)",
           "group": "3_modify@1"
         },
         {
           "command": "sshMultiConnect.renameRemote",
-          "when": "viewItem == remoteDirectory || viewItem == remoteFile",
+          "when": "!listMultiSelection && (viewItem == remoteDirectory || viewItem == remoteFile)",
           "group": "3_modify@2"
         },
         {
@@ -267,11 +375,6 @@
           "command": "sshMultiConnect.addTunnel",
           "when": "viewItem == sshConnectionConnected",
           "group": "inline@0"
-        },
-        {
-          "command": "sshMultiConnect.addTunnel",
-          "when": "viewItem == sshConnectionConnected",
-          "group": "5_tunnel@1"
         },
         {
           "command": "sshMultiConnect.startTunnel",
@@ -297,6 +400,11 @@
           "command": "sshMultiConnect.stopTunnel",
           "when": "viewItem == sshTunnelUp",
           "group": "1_state@1"
+        },
+        {
+          "command": "sshMultiConnect.keepTunnel",
+          "when": "viewItem == sshTunnelUp || viewItem == sshTunnelDown",
+          "group": "1_state@2"
         },
         {
           "command": "sshMultiConnect.removeTunnel",
@@ -317,11 +425,19 @@
           "when": "false"
         },
         {
+          "command": "sshMultiConnect.forgetPassword",
+          "when": "false"
+        },
+        {
           "command": "sshMultiConnect.disconnect",
           "when": "false"
         },
         {
           "command": "sshMultiConnect.removeConnection",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.editConnection",
           "when": "false"
         },
         {
@@ -357,6 +473,18 @@
           "when": "false"
         },
         {
+          "command": "sshMultiConnect.copyToHost",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.downloadRemote",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.uploadToRemote",
+          "when": "false"
+        },
+        {
           "command": "sshMultiConnect.addTunnel",
           "when": "false"
         },
@@ -366,6 +494,10 @@
         },
         {
           "command": "sshMultiConnect.stopTunnel",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.keepTunnel",
           "when": "false"
         },
         {
@@ -407,6 +539,7 @@
     "@typescript-eslint/parser": "^8.34.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "3.9.2",
     "eslint": "^9.28.0",
     "prettier": "^3.9.6",
     "typescript": "^5.8.3"

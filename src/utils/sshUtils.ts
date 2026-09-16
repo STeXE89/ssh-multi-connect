@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
 import * as path from 'path';
@@ -5,6 +6,9 @@ import * as vscode from 'vscode';
 import { readFile, writeFile, fileExists, ensureDirectoryExists, ensureFileExists, appendToFile } from './fileUtils';
 import { SSH_DEFAULT_PORT, SSHConnection, parseSshConfig, upsertConnection, removeHost } from './sshConfig';
 import { isValidHostname } from './shell';
+import { knownHostsLine } from './hostKeys';
+import { ConfigReader, flattenConfig, hostOrigins } from './sshConfigInclude';
+import { expandHome } from './paths';
 
 export const SSH_CONFIG_DIR = path.join(os.homedir(), '.ssh');
 export const SSH_CONFIG_PATH = path.join(SSH_CONFIG_DIR, 'config');
@@ -54,13 +58,43 @@ export function checkSshTooling(): boolean {
     return false;
 }
 
+/** The filesystem, as the Include walker needs it. */
+const configReader: ConfigReader = {
+    read: filePath => {
+        try {
+            return fileExists(filePath) ? readFile(filePath) : undefined;
+        } catch {
+            return undefined;
+        }
+    },
+    list: directory => {
+        try {
+            return fs.readdirSync(directory);
+        } catch {
+            return undefined;
+        }
+    },
+};
+
 /**
- * Reads the ssh_config file, returning an empty string when it does not exist.
- * @returns The config file content.
+ * Reads one config file, returning an empty string when it does not exist.
+ *
+ * @param filePath The file to read.
+ * @returns Its content.
  */
-const readConfigContent = (): string => {
+const readConfigFile = (filePath: string): string => {
     ensureDirectoryExists(SSH_CONFIG_DIR, 0o700);
-    return fileExists(SSH_CONFIG_PATH) ? readFile(SSH_CONFIG_PATH) : '';
+    return fileExists(filePath) ? readFile(filePath) : '';
+};
+
+/**
+ * Reads the ssh_config file and everything it includes.
+ *
+ * @returns The assembled lines, each tagged with the file it came from.
+ */
+const readAssembledConfig = () => {
+    ensureDirectoryExists(SSH_CONFIG_DIR, 0o700);
+    return flattenConfig(SSH_CONFIG_PATH, configReader, SSH_CONFIG_DIR);
 };
 
 /**
@@ -70,9 +104,21 @@ const readConfigContent = (): string => {
  * @param connection The SSH connection details.
  */
 export const insertOrUpdateConnection = (connection: SSHConnection): void => {
+    if (connection.readOnly) {
+        vscode.window.showErrorMessage(
+            `"${connection.host}" is assembled from an Include, so this extension will not rewrite it. ` +
+                `Edit ${connection.sourceFile ?? SSH_CONFIG_PATH} directly.`
+        );
+        return;
+    }
+
+    // An included host is written back where it came from; writing it to the
+    // main config would leave two blocks for one name.
+    const target = connection.sourceFile ?? SSH_CONFIG_PATH;
+
     try {
-        const updated = upsertConnection(readConfigContent(), connection);
-        writeFile(SSH_CONFIG_PATH, updated, 0o600);
+        const updated = upsertConnection(readConfigFile(target), connection);
+        writeFile(target, updated, 0o600);
     } catch (error) {
         console.error('Error inserting or updating connection:', error);
         vscode.window.showErrorMessage(`Failed to save connection for host "${connection.host}".`);
@@ -83,10 +129,12 @@ export const insertOrUpdateConnection = (connection: SSHConnection): void => {
  * Removes a connection from the ssh_config file.
  * @param host The host name of the connection to remove.
  */
-export const removeConnection = (host: string): void => {
+export const removeConnection = (host: string, sourceFile?: string): void => {
+    const target = sourceFile ?? SSH_CONFIG_PATH;
+
     try {
-        const updated = removeHost(readConfigContent(), host);
-        writeFile(SSH_CONFIG_PATH, updated, 0o600);
+        const updated = removeHost(readConfigFile(target), host);
+        writeFile(target, updated, 0o600);
         vscode.window.showInformationMessage(`Connection for host "${host}" has been removed.`);
     } catch (error) {
         console.error('Error removing connection:', error);
@@ -109,12 +157,31 @@ export const getConnection = (host: string): SSHConnection | null => {
  */
 export const getAllConnections = (): SSHConnection[] => {
     try {
-        return parseSshConfig(readConfigContent());
+        const lines = readAssembledConfig();
+        const origins = hostOrigins(lines);
+
+        return parseSshConfig(lines.map(line => line.text).join('\n')).map(connection => {
+            const origin = origins.get(connection.host);
+            return origin
+                ? { ...connection, sourceFile: origin.file, readOnly: origin.spansIncludes || undefined }
+                : connection;
+        });
     } catch (error) {
         console.error('Error retrieving all connections:', error);
         return [];
     }
 };
+
+/**
+ * Resolves an `IdentityFile` path to something that can be opened.
+ *
+ * A config written for the `ssh` command normally says `~/.ssh/id_ed25519`,
+ * which only OpenSSH expands.
+ *
+ * @param identityFile The path as written in the config.
+ * @returns The path to read.
+ */
+export const resolveIdentityFile = (identityFile: string): string => expandHome(identityFile);
 
 /**
  * Ensures the identity file exists and has the correct permissions.
@@ -301,4 +368,26 @@ export const getHostKeyFromKeyscan = (hostname: string, port: number = SSH_DEFAU
     } catch {
         throw new Error(`Failed to retrieve host fingerprint for "${hostname}".`);
     }
+};
+
+/**
+ * Records a host key that arrived during a handshake.
+ *
+ * Used for hosts `ssh-keyscan` cannot reach on its own -- anything behind a
+ * bastion -- where the key is only ever seen through the tunnel.
+ *
+ * @param hostname The address the key belongs to.
+ * @param port The port it was served on.
+ * @param key The key blob from the handshake.
+ * @returns True when the key was written.
+ */
+export const rememberHostKey = (hostname: string, port: number, key: Buffer): boolean => {
+    const line = knownHostsLine(hostname, port, key);
+    if (!line) {
+        return false;
+    }
+
+    ensureFileExists(SSH_KNOWN_HOSTS_PATH, 0o600);
+    appendToFile(SSH_KNOWN_HOSTS_PATH, `${line}\n`);
+    return true;
 };
