@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One platform failing is worth knowing about on its own, so the others
+      # still run.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The same flag the extension ships with: cpu-features is optional and
+      # its native build crashes the extension host it would load into.
+      - run: npm ci --omit=optional
+
+      # Named separately so a failure says which one it was. The test script's
+      # own pretest repeats them, which costs a few seconds and is worth it.
+      - run: npm run compile
+
+      - run: npm run lint
+
+      - run: npm run format:check
+
+      # The tests run inside a real VS Code, which needs a display on Linux.
+      - name: Test
+        run: xvfb-run -a npm test
+        if: runner.os == 'Linux'
+
+      - name: Test
+        run: npm test
+        if: runner.os != 'Linux'
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --omit=optional
+      - run: npm run compile
+
+      # Proves the vsix still builds, and leaves it to download from the run:
+      # the same artefact a release would carry.
+      - run: npx vsce package --pre-release --out ssh-multi-connect.vsix
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: ssh-multi-connect.vsix
+          retention-days: 14

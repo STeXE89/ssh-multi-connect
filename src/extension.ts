@@ -29,9 +29,12 @@ import { SSHTunnelTreeItem } from './tunnelUi';
 import { followPathInTerminal } from './utils/settings';
 import { FileDetailsViewProvider } from './fileDetailsView';
 import { SSHTreeDragAndDropController } from './connectionDragAndDrop';
+import { initLogging, log, showLog } from './log';
 
 export function activate(context: vscode.ExtensionContext) {
     setExtensionContext(context);
+    initLogging(context);
+    log.info(`SSH Multi Connect ${context.extension.packageJSON?.version ?? ''} starting.`);
     checkSshTooling();
 
     // Not awaited: a marketplace that is slow or unreachable must not hold up
@@ -129,7 +132,7 @@ function showRemoteItemDetails(selection: readonly vscode.TreeItem[]): void {
     const shown = entries.length === 1 ? provider?.showDetails(entries[0]) : provider?.showSelectionSummary(entries);
 
     shown?.catch((error: unknown) => {
-        console.error('Could not show details for the selection:', error);
+        log.error('Could not show details for the selection', error);
     });
 }
 
@@ -277,6 +280,7 @@ function registerCommands(
             command: 'sshMultiConnect.removeTunnel',
             callback: (item: SSHTunnelTreeItem) => tunnels.remove(item.connectionId, item.entry.config.id),
         },
+        { command: 'sshMultiConnect.showLog', callback: () => showLog() },
         {
             command: 'sshMultiConnect.openSettings',
             // Filtering by the extension's own id shows exactly its settings,

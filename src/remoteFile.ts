@@ -20,6 +20,7 @@ import {
 } from './fileDetailsView';
 import { SelectedEntry, summariseSelection } from './utils/selectionSummary';
 import { ExtendedSSHConnection } from './sshConnection';
+import { log } from './log';
 
 /** Extracts a readable message from an unknown thrown value. */
 function errorText(error: unknown): string {
@@ -406,7 +407,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
                 this.tempFileMap.delete(filePath);
             } catch (err) {
-                console.error(`Failed to delete temporary file: ${filePath}`, err);
+                log.warn(`Could not delete the temporary file ${filePath}`, err);
             }
         }
     }
@@ -1049,7 +1050,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
             // escape as an unhandled promise rejection.
             void fileUtils
                 .deleteFile(filePath)
-                .catch(err => console.error(`Failed to delete temporary file: ${filePath}`, err));
+                .catch(err => log.warn(`Could not delete the temporary file ${filePath}`, err));
         }
 
         this.tempFileMap.clear();

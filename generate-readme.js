@@ -115,6 +115,14 @@ is expanded. A host defined in an included file is written back to that file,
 not copied into the main config. A block that itself contains an \`Include\` is
 left alone by the editor, since rewriting it would drop that line.
 
+## When something goes wrong
+
+**Output → SSH Multi Connect** carries what the extension is doing: connections
+opening and closing, tunnels starting, host keys changing, and anything that
+failed. **SSH Multi Connect: Show Log** in the command palette opens it. The
+level is VS Code's own, in the Output view's gear menu -- raise it to Debug to
+see the quieter lines.
+
 ## Extension Settings
 
 This extension contributes the following settings:

@@ -146,6 +146,12 @@
         "tooltip": "Copy Path"
       },
       {
+        "command": "sshMultiConnect.showLog",
+        "icon": "$(output)",
+        "title": "Show Log",
+        "tooltip": "Open this extension's log in the Output view"
+      },
+      {
         "command": "sshMultiConnect.openSettings",
         "icon": "$(gear)",
         "title": "SSH Multi Connect Settings",

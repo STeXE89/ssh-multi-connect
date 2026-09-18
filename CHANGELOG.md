@@ -2,6 +2,16 @@
 
 All notable changes to the "ssh-multi-connect" extension will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- A log in **Output → SSH Multi Connect**, and **Show Log** to open it.
+
+### Fixed
+
+- A test could fail for the machine's sake rather than its own, on a port the operating system had handed to something else.
+
 ## [0.0.10] - 2026/09/16
 
 ### Added

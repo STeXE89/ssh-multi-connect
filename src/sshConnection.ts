@@ -53,6 +53,7 @@ import {
     countInFolder,
 } from './utils/folders';
 import { RemoteFileProvider, RemoteFileViewTitle, EmptyRemoteFileProvider } from './remoteFile';
+import { log } from './log';
 import {
     SSH_DEFAULT_PORT,
     SSHConnection,
@@ -370,7 +371,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             this.syncMultiCommandPanel();
             this._onDidChangeTreeData.fire();
         } catch (error) {
-            console.error('Error loading SSH connections:', error);
+            log.error('Could not load the connections', error);
             vscode.window.showErrorMessage('Failed to load SSH connections.');
         }
     }
@@ -1085,7 +1086,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
                     await this.restartTunnels(connection);
                     return;
                 } catch (error) {
-                    console.error(`Reconnect to ${connection.host} failed:`, error);
+                    log.warn(`Reconnect to ${connection.host} failed`, error);
                     connection.client?.end();
                     connection.client = undefined;
                     connection.jump?.dispose();
@@ -1194,7 +1195,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             // Validate connection properties before creating the tree item
             const label = connection.user ? `${connection.user}@${connection.host}` : connection.host;
             if (!label) {
-                console.error('Invalid connection label:', connection);
+                log.error('Connection has no usable label', connection.host);
                 vscode.window.showErrorMessage('Failed to select connection: Invalid connection label.');
                 return;
             }
@@ -1205,7 +1206,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             try {
                 this._onDidChangeTreeData.fire(treeItem);
             } catch (error) {
-                console.error('Error updating tree view:', error);
+                log.error('Could not update the tree view', error);
                 vscode.window.showErrorMessage('Failed to update tree view.');
             }
         }

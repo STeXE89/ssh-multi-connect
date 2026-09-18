@@ -9,6 +9,7 @@ import { isValidHostname } from './shell';
 import { knownHostsLine } from './hostKeys';
 import { ConfigReader, flattenConfig, hostOrigins } from './sshConfigInclude';
 import { expandHome } from './paths';
+import { log } from '../log';
 
 export const SSH_CONFIG_DIR = path.join(os.homedir(), '.ssh');
 export const SSH_CONFIG_PATH = path.join(SSH_CONFIG_DIR, 'config');
@@ -120,7 +121,7 @@ export const insertOrUpdateConnection = (connection: SSHConnection): void => {
         const updated = upsertConnection(readConfigFile(target), connection);
         writeFile(target, updated, 0o600);
     } catch (error) {
-        console.error('Error inserting or updating connection:', error);
+        log.error('Could not save the connection', error);
         vscode.window.showErrorMessage(`Failed to save connection for host "${connection.host}".`);
     }
 };
@@ -137,7 +138,7 @@ export const removeConnection = (host: string, sourceFile?: string): void => {
         writeFile(target, updated, 0o600);
         vscode.window.showInformationMessage(`Connection for host "${host}" has been removed.`);
     } catch (error) {
-        console.error('Error removing connection:', error);
+        log.error('Could not remove the connection', error);
         vscode.window.showErrorMessage(`Failed to remove connection for host "${host}".`);
     }
 };
@@ -167,7 +168,7 @@ export const getAllConnections = (): SSHConnection[] => {
                 : connection;
         });
     } catch (error) {
-        console.error('Error retrieving all connections:', error);
+        log.error('Could not read ssh_config', error);
         return [];
     }
 };
@@ -279,7 +280,7 @@ export const addKnownHost = (hostname: string, fingerprint: string, port: number
 
         if (exists) {
             if (existingFingerprint && existingFingerprint !== fingerprint) {
-                console.log(`Host "${hostname}" fingerprint has changed. Updating known_hosts.`);
+                log.warn(`Host "${hostname}" changed its key; updating known_hosts.`);
                 removeKnownHost(hostname);
             } else {
                 return;
@@ -293,7 +294,7 @@ export const addKnownHost = (hostname: string, fingerprint: string, port: number
 
         // fs rather than a shell redirect: the key text comes from the server.
         appendToFile(SSH_KNOWN_HOSTS_PATH, `${publicKeys}\n`);
-        console.log(`Host "${hostname}" added to known_hosts.`);
+        log.info(`Host "${hostname}" added to known_hosts.`);
     } catch (error) {
         throw error instanceof Error ? error : new Error(String(error));
     }
@@ -310,9 +311,9 @@ export const removeKnownHost = (hostname: string): void => {
         }
 
         runCapture('ssh-keygen', ['-R', hostname, '-f', SSH_KNOWN_HOSTS_PATH]);
-        console.log(`Host "${hostname}" removed from known_hosts.`);
+        log.info(`Host "${hostname}" removed from known_hosts.`);
     } catch (error) {
-        console.error(`Error removing known host "${hostname}":`, error);
+        log.error(`Could not remove known host "${hostname}"`, error);
     }
 };
 

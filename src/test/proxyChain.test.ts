@@ -65,14 +65,16 @@ async function bastion(): Promise<Hop> {
     };
 }
 
-/** A port nothing is listening on. */
-async function deadPort(): Promise<number> {
-    const probe = net.createServer();
-    await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve));
-    const { port } = probe.address() as net.AddressInfo;
-    await new Promise<void>(resolve => probe.close(() => resolve()));
-    return port;
-}
+/**
+ * A port nothing can be listening on.
+ *
+ * Port 1 needs privileges to bind, so no server in this suite can take it. An
+ * ephemeral port that was opened and closed would look free but is drawn from
+ * the same range the bastions below bind with `listen(0)`, so the operating
+ * system is free to hand one of them the very port a test is relying on being
+ * dead.
+ */
+const DEAD_PORT = 1;
 
 const noConfig = () => null;
 const anyPassword = async () => ({ password: 'unused-by-the-test-server' });
@@ -217,13 +219,11 @@ suite('proxyChain: opening a chain', () => {
     });
 
     test('names the hop that could not be reached', async () => {
-        const port = await deadPort();
-
         await assert.rejects(
             openJumpChain(
                 [{ host: 'bastion' }],
                 { host: '127.0.0.1', port: 22 },
-                () => ({ host: 'bastion', hostname: '127.0.0.1', port }),
+                () => ({ host: 'bastion', hostname: '127.0.0.1', port: DEAD_PORT }),
                 anyPassword,
                 acceptKey
             ),
@@ -233,17 +233,16 @@ suite('proxyChain: opening a chain', () => {
 
     test('names the hop that could not reach the next one', async () => {
         const hop = await bastion();
-        const port = await deadPort();
 
         await assert.rejects(
             openJumpChain(
                 [{ host: 'bastion' }],
-                { host: '127.0.0.1', port },
+                { host: '127.0.0.1', port: DEAD_PORT },
                 () => ({ host: 'bastion', hostname: '127.0.0.1', port: hop.port }),
                 anyPassword,
                 acceptKey
             ),
-            new RegExp(`could not reach 127\\.0\\.0\\.1:${port}`)
+            new RegExp(`could not reach 127\\.0\\.0\\.1:${DEAD_PORT}`)
         );
 
         await hop.close();
