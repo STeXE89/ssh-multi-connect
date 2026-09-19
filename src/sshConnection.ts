@@ -1801,8 +1801,25 @@ export class MultiCommandPanel {
         };
 
         this.view.webview.onDidReceiveMessage(message => {
+            if (message?.type === 'splitTerminals') {
+                void vscode.workspace
+                    .getConfiguration('sshMultiConnect')
+                    .update('splitTerminalsForMultiCommand', !!message.value, vscode.ConfigurationTarget.Global);
+                return;
+            }
+
             this.sendCommandToConnections(message.command, message.selectedConnections);
         });
+
+        // The toggle mirrors the setting, so a change made anywhere else shows
+        // here rather than leaving the panel saying something untrue.
+        this.subscriptions.push(
+            vscode.workspace.onDidChangeConfiguration(event => {
+                if (event.affectsConfiguration('sshMultiConnect.splitTerminalsForMultiCommand')) {
+                    void this.view.webview.postMessage({ splitTerminals: splitTerminalsForMultiCommand() });
+                }
+            })
+        );
 
         this.view.onDidChangeVisibility(() => {
             if (this.view.visible) {
@@ -1850,7 +1867,10 @@ export class MultiCommandPanel {
             user: conn.user,
             host: conn.host,
         }));
-        this.view.webview.postMessage({ connections: connectionOptions });
+        this.view.webview.postMessage({
+            connections: connectionOptions,
+            splitTerminals: splitTerminalsForMultiCommand(),
+        });
     }
 
     private sendCommandToConnections(command: string, selectedConnectionIds: string[]) {

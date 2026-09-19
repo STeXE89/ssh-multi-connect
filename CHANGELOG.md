@@ -6,7 +6,9 @@ All notable changes to the "ssh-multi-connect" extension will be documented in t
 
 ### Added
 
+- **Search on Host...** runs `grep` on the host and opens a match at its line.
 - A log in **Output → SSH Multi Connect**, and **Show Log** to open it.
+- A checkbox in the multi-command panel for the split terminal group, so it can be turned off without opening settings.
 
 ### Fixed
 

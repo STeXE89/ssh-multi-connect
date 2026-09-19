@@ -1,8 +1,9 @@
 import * as assert from 'assert';
 import * as net from 'net';
-import { Client, Server, utils } from 'ssh2';
+import { Client, Server } from 'ssh2';
 import { openJumpChain, resolveHop, HopTarget } from '../proxyChain';
 import { SSHConnection } from '../utils/sshConfig';
+import { testHostKey } from './sshTestKey';
 
 /**
  * Exercises a real jump chain.
@@ -23,12 +24,11 @@ interface Hop {
 
 /** Starts an ssh2 server that forwards direct-tcpip requests for real. */
 async function bastion(): Promise<Hop> {
-    const hostKey = utils.generateKeyPairSync('ed25519');
     const requested: { host: string; port: number }[] = [];
     const users: string[] = [];
     const sockets = new Set<net.Socket>();
 
-    const server = new Server({ hostKeys: [hostKey.private] }, connection => {
+    const server = new Server({ hostKeys: [testHostKey()] }, connection => {
         connection.on('authentication', ctx => {
             users.push(ctx.username);
             ctx.accept();

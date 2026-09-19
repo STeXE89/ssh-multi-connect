@@ -23,6 +23,7 @@ import { CommandResultsDocuments, RESULTS_SCHEME } from './commandResultsDocumen
 import { copyToHost } from './remoteCopyUi';
 import { downloadRemote } from './remoteDownloadUi';
 import { uploadToRemote } from './remoteUploadUi';
+import { searchRemote } from './remoteSearchUi';
 import { checkReleaseChannel } from './releaseCheck';
 import { runCommandOnHosts } from './multiCommandUi';
 import { SSHTunnelTreeItem } from './tunnelUi';
@@ -287,6 +288,28 @@ function registerCommands(
             // and survives a rename of the publisher or the extension.
             callback: () =>
                 vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${context.extension.id}`),
+        },
+        {
+            command: 'sshMultiConnect.searchRemote',
+            callback: (node?: RemoteFileTreeItem | SSHConnectionTreeItem) => {
+                if (node instanceof RemoteFileTreeItem) {
+                    const directory = node.isDirectory
+                        ? node.resourceUri.path
+                        : node.resourceUri.path.slice(0, node.resourceUri.path.lastIndexOf('/')) || '/';
+                    return searchRemote(node.connection, directory);
+                }
+
+                const connection =
+                    node?.connection ??
+                    sshViewProvider.connections.find(c => c.id === sshViewProvider.activeRemoteConnectionId);
+                if (!connection) {
+                    vscode.window.showInformationMessage('Connect to a host to search it.');
+                    return undefined;
+                }
+
+                const provider = RemoteFileProvider.getProviderByConnectionId(connection.id);
+                return searchRemote(connection, provider?.rootPath ?? '/');
+            },
         },
         {
             command: 'sshMultiConnect.uploadToRemote',

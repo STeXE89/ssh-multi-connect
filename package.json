@@ -122,6 +122,12 @@
         "tooltip": "Delete"
       },
       {
+        "command": "sshMultiConnect.searchRemote",
+        "icon": "$(search)",
+        "title": "Search on Host...",
+        "tooltip": "Search this host's files with grep, on the host itself"
+      },
+      {
         "command": "sshMultiConnect.uploadToRemote",
         "icon": "$(cloud-upload)",
         "title": "Upload...",
@@ -229,7 +235,7 @@
         "sshMultiConnect.splitTerminalsForMultiCommand": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Send a multi-host command to a split terminal group, one pane per selected host, so every host's output is visible at once.\n\nThese are terminals the panel opens itself, a second shell on each connection: VS Code can only place a terminal in a split group as it is created. Closing one does not disconnect the host.\n\nTurn this off to send the command to each connection's own terminal instead, as before."
+          "markdownDescription": "Send a multi-host command to a split terminal group, one pane per selected host, so every host's output is visible at once.\n\nThese are terminals the panel opens itself, a second shell on each connection: VS Code can only place a terminal in a split group as it is created. Closing one does not disconnect the host.\n\nTurn this off to send the command to each connection's own terminal instead, as before. The panel carries a checkbox for the same setting, so it can be changed without coming here."
         },
         "sshMultiConnect.autoReconnect": {
           "type": "boolean",
@@ -275,6 +281,11 @@
           "command": "sshMultiConnect.uploadToRemote",
           "when": "view == remoteFilesView && sshConnectionActive",
           "group": "navigation@0"
+        },
+        {
+          "command": "sshMultiConnect.searchRemote",
+          "when": "view == remoteFilesView && sshConnectionActive",
+          "group": "navigation@1"
         },
         {
           "command": "sshMultiConnect.refreshRemoteFiles",
@@ -336,6 +347,16 @@
           "command": "sshMultiConnect.uploadToRemote",
           "when": "!listMultiSelection && (viewItem == remoteFile || viewItem == remoteDirectory)",
           "group": "6_transfer@2"
+        },
+        {
+          "command": "sshMultiConnect.searchRemote",
+          "when": "!listMultiSelection && viewItem == remoteDirectory",
+          "group": "1_open@2"
+        },
+        {
+          "command": "sshMultiConnect.searchRemote",
+          "when": "viewItem == sshConnectionConnected",
+          "group": "1_state@3"
         },
         {
           "command": "sshMultiConnect.downloadRemote",

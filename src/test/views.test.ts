@@ -192,3 +192,32 @@ suite('FileDetailsViewProvider', () => {
         assert.doesNotThrow(() => fake.post({ command: 'applyPermissions' }));
     });
 });
+
+suite('multi-command panel markup', () => {
+    const read = (name: string) =>
+        require('fs').readFileSync(require('path').join(__dirname, '../../resources/media/webviews', name), 'utf-8');
+
+    test('offers the split-terminal toggle', () => {
+        const html = read('multiCommandPanel.html');
+
+        assert.ok(html.includes('id="split"'));
+        assert.ok(html.includes('type="checkbox"'));
+    });
+
+    test('the script reads and reports the toggle', () => {
+        const script = read('multiCommandPanel.js');
+
+        // Reports a change to the extension, and accepts the current value
+        // back, so the panel never disagrees with the setting.
+        assert.ok(script.includes("type: 'splitTerminals'"));
+        assert.ok(script.includes('splitTerminals !== undefined'));
+    });
+
+    test('the send message says what it is, so the two cannot be confused', () => {
+        assert.ok(read('multiCommandPanel.js').includes("type: 'send'"));
+    });
+
+    test('the panel still declares a content security policy', () => {
+        assert.ok(read('multiCommandPanel.html').includes('Content-Security-Policy'));
+    });
+});

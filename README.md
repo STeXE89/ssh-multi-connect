@@ -15,6 +15,7 @@ This extension 'ssh-multi-connect' allows you to group SSH connections into fold
 - Create, rename and delete remote files and folders from the right-click menu.
 - Retry an operation with sudo when the remote user lacks permission.
 - Run one command across hosts and read the collected output in one report.
+- Search a host's files with `grep`, run on the host, and open a match where it is.
 - Upload files and folders by dragging them onto the remote tree, or by picking them.
 - Move remote files and folders by dragging them within the tree.
 - Select several remote entries to move, copy, download, or delete them together.
@@ -143,7 +144,8 @@ once -- they will not chase each other.
   on dash, ash, fish, csh and anything else the setup line does nothing at all,
   silently, and the tree will not follow.
 
-* `sshMultiConnect.splitTerminalsForMultiCommand` (default `true`): send a
+* `sshMultiConnect.splitTerminalsForMultiCommand` (default `true`, and a
+  checkbox in the panel itself): send a
   multi-host command to a split terminal group, one pane per selected host, so every
   host's output is visible at once. These are terminals the panel opens itself, a
   second shell on each connection; closing one does not disconnect the host. Turn it

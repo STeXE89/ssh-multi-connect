@@ -2,7 +2,15 @@ const vscode = acquireVsCodeApi();
 
 // Listen for updates from the extension
 window.addEventListener('message', event => {
-    const { connections } = event.data;
+    const { connections, splitTerminals } = event.data;
+
+    // The setting can change from the settings editor too, so the panel is
+    // told the current value rather than remembering its own.
+    if (splitTerminals !== undefined) {
+        splitToggle.checked = splitTerminals;
+        describeSplit();
+    }
+
     if (!connections) {
         return;
     }
@@ -17,6 +25,19 @@ window.addEventListener('message', event => {
 const sendButton = document.getElementById('send');
 const connectionsSelect = document.getElementById('connections');
 const commandInput = document.getElementById('command');
+const splitToggle = document.getElementById('split');
+const splitHint = document.getElementById('split-hint');
+
+function describeSplit() {
+    splitHint.textContent = splitToggle.checked
+        ? 'Each selected host gets a pane, side by side.'
+        : "The command goes to each host's own terminal.";
+}
+
+splitToggle.addEventListener('change', () => {
+    describeSplit();
+    vscode.postMessage({ type: 'splitTerminals', value: splitToggle.checked });
+});
 
 function updateSendButtonState() {
     const selectedConnections = Array.from(connectionsSelect.selectedOptions).map(option => option.value);
@@ -34,7 +55,7 @@ function sendCommand() {
         return;
     }
 
-    vscode.postMessage({ command, selectedConnections });
+    vscode.postMessage({ type: 'send', command, selectedConnections });
     commandInput.value = '';
     updateSendButtonState();
 }

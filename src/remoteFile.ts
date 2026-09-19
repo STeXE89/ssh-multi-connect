@@ -448,7 +448,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         // still upload. onDidCloseTextDocument cleans it up.
     }
 
-    public async openRemoteFile(resourceUri: vscode.Uri) {
+    public async openRemoteFile(resourceUri: vscode.Uri, line?: number) {
         try {
             if (!this.sftp) {
                 this.sftp = await sftpUtils.getSFTPClient(this.connection.client!);
@@ -457,7 +457,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
             const stat = await sftpUtils.getRemoteStat(this.sftp, resourceUri.path);
 
             if (stat.isFile()) {
-                await this.openRemoteFileInEditor(resourceUri);
+                await this.openRemoteFileInEditor(resourceUri, line);
             } else {
                 vscode.window.showErrorMessage('Unsupported file type.');
             }
@@ -467,7 +467,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         }
     }
 
-    private async openRemoteFileInEditor(resourceUri: vscode.Uri) {
+    private async openRemoteFileInEditor(resourceUri: vscode.Uri, line?: number) {
         // The remote directory is folded in so two files sharing a basename on
         // one host do not collide locally.
         const remoteDirDigest = createHash('sha1')
@@ -506,7 +506,17 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
         try {
             const document = await vscode.workspace.openTextDocument(localUri);
-            await vscode.window.showTextDocument(document);
+
+            // A search result names a line; anything else opens at the top.
+            const selection =
+                line === undefined
+                    ? undefined
+                    : new vscode.Range(
+                          new vscode.Position(Math.max(0, line - 1), 0),
+                          new vscode.Position(Math.max(0, line - 1), 0)
+                      );
+
+            await vscode.window.showTextDocument(document, { selection });
         } catch (error) {
             // openTextDocument refuses binary content; let VS Code pick an
             // editor for it instead of forcing a text one.
