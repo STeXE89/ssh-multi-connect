@@ -18,14 +18,20 @@
         </div>
         <div class="field">
             <h3>Command</h3>
-            <input id="command" placeholder="uptime" />
-            <label class="toggle">
-                <input id="split" type="checkbox" />
-                <span>Open a split terminal per host</span>
-            </label>
-            <div class="info" id="split-hint"></div>
-            <button id="send">Send to selected</button>
+            <input id="command" placeholder="uptime" list="history" />
+            <datalist id="history"></datalist>
         </div>
+        <div class="field">
+            <h3>Where it runs</h3>
+            <label class="toggle" title="Also in Settings: sshMultiConnect.splitTerminalsForMultiCommand">
+                <input id="split" type="checkbox" />
+                <span class="toggle-text">
+                    <span class="toggle-title">Split terminal per host</span>
+                    <span class="toggle-hint" id="split-hint"></span>
+                </span>
+            </label>
+        </div>
+        <button id="send">Send to selected</button>
         <script src="multiCommandPanel.js"></script>
     </body>
 </html>

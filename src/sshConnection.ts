@@ -21,6 +21,7 @@ import {
 import { accountLabel, hostPasswordPrompt } from './utils/authPrompts';
 import { RemoteViewAction, remoteViewAfterDisconnect } from './utils/viewState';
 import { missingTerminals, selectedTargets, splitTerminalName } from './utils/multiCommandTargets';
+import { readHistory, rememberCommand } from './utils/commandHistory';
 import {
     splitTerminalsForMultiCommand,
     autoReconnect,
@@ -1484,6 +1485,43 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
      * @param connection The host to connect.
      * @returns The connection once it is live, or undefined when it failed.
      */
+    /**
+     * Shows the host key this machine has recorded, and offers to drop it.
+     *
+     * A changed key is otherwise a modal that appears once, at the worst
+     * possible moment. Being able to look at the entry, and to remove it after
+     * a host has genuinely been rebuilt, is the other half of that.
+     *
+     * @param treeItem The connection to inspect.
+     */
+    public async manageHostKey(treeItem: SSHConnectionTreeItem): Promise<void> {
+        const { hostname, host } = treeItem.connection;
+        const { exists, key } = isKnownHost(hostname);
+
+        if (!exists) {
+            vscode.window.showInformationMessage(
+                `No host key recorded for ${hostname}. One is added the first time you connect.`
+            );
+            return;
+        }
+
+        const answer = await vscode.window.showInformationMessage(
+            `${host} (${hostname})`,
+            {
+                modal: true,
+                detail: `Recorded fingerprint:\n${key ?? 'unreadable'}\n\nRemoving it means the next connection accepts whatever key the host offers, so only do it for a host you know has been rebuilt.`,
+            },
+            'Remove from known_hosts'
+        );
+
+        if (answer !== 'Remove from known_hosts') {
+            return;
+        }
+
+        removeKnownHost(hostname);
+        vscode.window.showInformationMessage(`Removed the recorded key for ${hostname}.`);
+    }
+
     public async ensureConnected(connection: ExtendedSSHConnection): Promise<ExtendedSSHConnection | undefined> {
         if (connection.client) {
             return connection;
@@ -1782,15 +1820,24 @@ export class SSHFolderTreeItem extends vscode.TreeItem {
 }
 
 export class MultiCommandPanel {
+    /** Where the command history is kept between sessions. */
+    private static readonly HISTORY_KEY = 'multiCommand.history';
+
     private connections: ExtendedSSHConnection[];
     private terminals: Map<string, vscode.Terminal> = new Map();
     /** The panel's own terminals, one per host, shown side by side. */
     private readonly splitTerminals = new Map<string, vscode.Terminal>();
     private readonly subscriptions: vscode.Disposable[] = [];
 
+    /**
+     * @param view The webview this panel draws into.
+     * @param connections The connections to offer.
+     * @param state Where the command history is remembered, if anywhere.
+     */
     constructor(
         private readonly view: vscode.WebviewView,
-        connections: ExtendedSSHConnection[]
+        connections: ExtendedSSHConnection[],
+        private readonly state?: vscode.Memento
     ) {
         this.connections = connections;
         // localResourceRoots must be set explicitly, or the panel's own
@@ -1870,6 +1917,7 @@ export class MultiCommandPanel {
         this.view.webview.postMessage({
             connections: connectionOptions,
             splitTerminals: splitTerminalsForMultiCommand(),
+            history: this.history(),
         });
     }
 
@@ -1880,6 +1928,8 @@ export class MultiCommandPanel {
             vscode.window.showErrorMessage('No connections selected.');
             return;
         }
+
+        this.remember(command);
 
         if (splitTerminalsForMultiCommand()) {
             this.sendToSplitGroup(command, selectedConnections);
@@ -1945,6 +1995,26 @@ export class MultiCommandPanel {
         // you are looking at alone. preserveFocus keeps the command box's
         // cursor either way.
         opened?.show(true);
+    }
+
+    /** The commands sent from this panel before, most recent first. */
+    private history(): string[] {
+        return readHistory(this.state?.get(MultiCommandPanel.HISTORY_KEY));
+    }
+
+    /**
+     * Adds a command to the history and tells the panel.
+     *
+     * @param command The command just sent.
+     */
+    private remember(command: string): void {
+        if (!this.state) {
+            return;
+        }
+
+        const updated = rememberCommand(this.history(), command);
+        void this.state.update(MultiCommandPanel.HISTORY_KEY, updated);
+        void this.view.webview.postMessage({ history: updated });
     }
 
     /** The terminal a new pane should split from, if the group is open. */

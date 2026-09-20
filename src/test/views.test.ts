@@ -204,6 +204,29 @@ suite('multi-command panel markup', () => {
         assert.ok(html.includes('type="checkbox"'));
     });
 
+    test('the toggle carries a title and a hint of its own, not a bare label', () => {
+        const html = read('multiCommandPanel.html');
+
+        assert.ok(html.includes('toggle-title'));
+        assert.ok(html.includes('id="split-hint"'));
+    });
+
+    test('the hint says something different for each state', () => {
+        const script = read('multiCommandPanel.js');
+        const hints = [...script.matchAll(/splitHint\.textContent[\s\S]{0,200}?;/g)].join('');
+
+        assert.ok(hints.includes('side by side'));
+        assert.ok(hints.includes("host's own terminal"));
+    });
+
+    test('the send button is the last thing in the panel', () => {
+        const html = read('multiCommandPanel.html');
+
+        // It commits everything above it, so it belongs after the options
+        // rather than in the middle of them.
+        assert.ok(html.indexOf('id="send"') > html.indexOf('id="split"'));
+    });
+
     test('the script reads and reports the toggle', () => {
         const script = read('multiCommandPanel.js');
 

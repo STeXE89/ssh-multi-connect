@@ -7,6 +7,8 @@ All notable changes to the "ssh-multi-connect" extension will be documented in t
 ### Added
 
 - **Search on Host...** runs `grep` on the host and opens a match at its line.
+- **Host Key...** shows the fingerprint recorded for a host, and removes it when the host has been rebuilt.
+- The multi-command panel suggests the commands you have sent before.
 - A log in **Output → SSH Multi Connect**, and **Show Log** to open it.
 - A checkbox in the multi-command panel for the split terminal group, so it can be turned off without opening settings.
 

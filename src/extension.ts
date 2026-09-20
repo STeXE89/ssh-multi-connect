@@ -262,6 +262,10 @@ function registerCommands(
                 withRemoteProvider(node, provider => provider.deleteItem(selected(node, selection))),
         },
         {
+            command: 'sshMultiConnect.manageHostKey',
+            callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.manageHostKey(treeItem),
+        },
+        {
             command: 'sshMultiConnect.addTunnel',
             callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.addTunnel(treeItem),
         },
@@ -482,7 +486,7 @@ function registerTreeAndWebviewProviders(context: vscode.ExtensionContext, sshVi
         vscode.window.registerWebviewViewProvider('multiCommandView', {
             resolveWebviewView: webviewView => {
                 const connectedConnections = sshViewProvider.connections.filter(conn => conn.client);
-                const multiCommandPanel = new MultiCommandPanel(webviewView, connectedConnections);
+                const multiCommandPanel = new MultiCommandPanel(webviewView, connectedConnections, context.globalState);
 
                 sshViewProvider.setMultiCommandPanel(multiCommandPanel);
                 sshViewProvider.refresh();

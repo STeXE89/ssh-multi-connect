@@ -164,6 +164,12 @@
         "tooltip": "Open SSH Multi Connect settings"
       },
       {
+        "command": "sshMultiConnect.manageHostKey",
+        "icon": "$(key)",
+        "title": "Host Key...",
+        "tooltip": "Show the recorded host key, and remove it if the host was rebuilt"
+      },
+      {
         "command": "sshMultiConnect.addTunnel",
         "icon": "$(plug)",
         "title": "Add Tunnel...",
@@ -404,6 +410,11 @@
           "group": "inline@0"
         },
         {
+          "command": "sshMultiConnect.manageHostKey",
+          "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
+          "group": "3_keys@1"
+        },
+        {
           "command": "sshMultiConnect.startTunnel",
           "when": "viewItem == sshTunnelDown",
           "group": "inline@1"
@@ -513,6 +524,10 @@
         },
         {
           "command": "sshMultiConnect.addTunnel",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.manageHostKey",
           "when": "false"
         },
         {

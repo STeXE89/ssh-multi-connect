@@ -22,6 +22,8 @@ ${packageJson.description}
 - Open remote files in the editor and save changes back to the server.
 - Organize SSH connections into folders, with drag and drop.
 - Execute commands on multiple hosts simultaneously.
+- Inspect and remove a recorded host key.
+- Recent multi-host commands are suggested rather than retyped.
 - Open local and remote SSH tunnels, with start/stop control and live state.
 - Inspect remote files and folders, and edit their permissions and ownership.
 - Create, rename and delete remote files and folders from the right-click menu.

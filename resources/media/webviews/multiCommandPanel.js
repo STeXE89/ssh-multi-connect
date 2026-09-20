@@ -2,7 +2,13 @@ const vscode = acquireVsCodeApi();
 
 // Listen for updates from the extension
 window.addEventListener('message', event => {
-    const { connections, splitTerminals } = event.data;
+    const { connections, splitTerminals, history } = event.data;
+
+    // Offered as native suggestions on the input, so the commands run across
+    // hosts do not have to be retyped every time.
+    if (history) {
+        historyList.replaceChildren(...history.map(command => new Option(command)));
+    }
 
     // The setting can change from the settings editor too, so the panel is
     // told the current value rather than remembering its own.
@@ -26,12 +32,13 @@ const sendButton = document.getElementById('send');
 const connectionsSelect = document.getElementById('connections');
 const commandInput = document.getElementById('command');
 const splitToggle = document.getElementById('split');
+const historyList = document.getElementById('history');
 const splitHint = document.getElementById('split-hint');
 
 function describeSplit() {
     splitHint.textContent = splitToggle.checked
-        ? 'Each selected host gets a pane, side by side.'
-        : "The command goes to each host's own terminal.";
+        ? 'A pane per selected host, side by side.'
+        : "Each host's own terminal, as they already are.";
 }
 
 splitToggle.addEventListener('change', () => {
