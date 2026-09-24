@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { connectionTuning, agentAddress } from '../utils/connectOptions';
+import { connectionTuning, agentAddress, chooseIdentityFile } from '../utils/connectOptions';
 import { SSHConnection } from '../utils/sshConfig';
 
 function connection(overrides: Partial<SSHConnection> = {}): SSHConnection {
@@ -84,5 +84,35 @@ suite('connectOptions: locating the agent', () => {
 
     test('reports none elsewhere', () => {
         assert.strictEqual(agentAddress({}, 'linux'), undefined);
+    });
+});
+
+suite('connectOptions: choosing the key', () => {
+    const convention = () => '/home/me/.ssh/host_key';
+
+    test('uses the key ssh_config names', () => {
+        assert.strictEqual(
+            chooseIdentityFile('/home/me/.ssh/project_ed25519', convention),
+            '/home/me/.ssh/project_ed25519'
+        );
+    });
+
+    test("falls back to this extension's own convention when the config names none", () => {
+        assert.strictEqual(chooseIdentityFile(undefined, convention), '/home/me/.ssh/host_key');
+        assert.strictEqual(chooseIdentityFile('   ', convention), '/home/me/.ssh/host_key');
+    });
+
+    test('does not go looking for the fallback when it is not needed', () => {
+        // The fallback throws when the conventional file is absent, so reaching
+        // for it unnecessarily turns a working connection into an error.
+        const explode = () => {
+            throw new Error('should not have been called');
+        };
+
+        assert.strictEqual(chooseIdentityFile('/home/me/.ssh/named', explode), '/home/me/.ssh/named');
+    });
+
+    test('trims the path, since ssh_config values keep their spacing', () => {
+        assert.strictEqual(chooseIdentityFile('  /home/me/.ssh/named  ', convention), '/home/me/.ssh/named');
     });
 });

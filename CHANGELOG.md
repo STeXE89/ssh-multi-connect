@@ -14,7 +14,9 @@ All notable changes to the "ssh-multi-connect" extension will be documented in t
 
 ### Fixed
 
-- A test could fail for the machine's sake rather than its own, on a port the operating system had handed to something else.
+- A host whose `ssh_config` names its own `IdentityFile` authenticated with a different key: the path was replaced with this extension's own `~/.ssh/<host>_key` convention.
+- A `Match` block was read as part of the host above it, so that host showed settings that were not its own — and rewriting it, which happens on any edit, deleted the `Match` block from `ssh_config` entirely.
+- A test could fail for the machine's sake rather than its own.
 
 ## [0.0.10] - 2026/09/16
 

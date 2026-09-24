@@ -8,7 +8,7 @@ import {
 } from './constants/globals';
 import * as fileUtils from './utils/fileUtils';
 import { SSHPseudoterminal } from './sshTerminal';
-import { connectionTuning, agentAddress, isAuthFailure } from './utils/connectOptions';
+import { connectionTuning, agentAddress, isAuthFailure, chooseIdentityFile } from './utils/connectOptions';
 import { CredentialStore } from './credentials';
 import {
     EditableField,
@@ -863,7 +863,9 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         }
 
         if (connection.usePrivateKey) {
-            connection.identityFile = getIdentityFile(connection.host);
+            connection.identityFile = chooseIdentityFile(connection.identityFile, () =>
+                getIdentityFile(connection.host)
+            );
             await this.connectWithSSHKey(connection, treeItem);
             return;
         }

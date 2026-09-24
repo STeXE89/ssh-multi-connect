@@ -116,7 +116,9 @@ The host list is your \`~/.ssh/config\`, read the way \`ssh\` reads it:
 \`Include\` directives are followed, globs and all, and a leading \`~\` in a path
 is expanded. A host defined in an included file is written back to that file,
 not copied into the main config. A block that itself contains an \`Include\` is
-left alone by the editor, since rewriting it would drop that line.
+left alone by the editor, since rewriting it would drop that line. A \`Match\` block
+is left alone too: it is not read as a host, and it survives any edit to the hosts
+around it.
 
 ## When something goes wrong
 
