@@ -6,6 +6,8 @@ import * as sftpUtils from './utils/sftpUtils';
 import * as fs from 'fs';
 import { quote } from './utils/shell';
 import { describeUpload } from './utils/dropTargets';
+import { parseFolderSize } from './utils/folderSize';
+import { runOnHost } from './multiCommandRun';
 import { MoveSource, describeMove, planMove } from './utils/remoteMove';
 import { planUpload, describeSkipped } from './utils/uploadPlan';
 import { PrivilegeEscalation, isPermissionDenied, sudoCommands } from './utils/privilege';
@@ -995,44 +997,17 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
     }
 
     private async calculateFolderSize(folderPath: string): Promise<string> {
-        try {
-            if (!this.connection.client) {
-                throw new Error('SSH connection is not established.');
-            }
-
-            return new Promise((resolve, reject) => {
-                this.connection.client?.exec(`du -sh ${quote(folderPath)}`, (err: any, stream: any) => {
-                    if (err) {
-                        reject(`Error executing remote command: ${err.message}`);
-                        return;
-                    }
-
-                    let output = '';
-                    let errorOutput = '';
-
-                    stream.on('data', (data: Buffer) => {
-                        output += data.toString();
-                    });
-
-                    stream.stderr.on('data', (data: Buffer) => {
-                        errorOutput += data.toString();
-                    });
-
-                    stream.on('close', (code: number) => {
-                        if (code !== 0) {
-                            reject(new Error(errorOutput.trim() || `du exited with code ${code}`));
-                        } else {
-                            const size = output.split('\t')[0].trim();
-                            resolve(size);
-                        }
-                    });
-                });
-            });
-        } catch {
-            // Reported in the panel rather than as a notification: selecting a
-            // folder must not raise a popup on a host without `du`.
+        const client = this.connection.client;
+        if (!client) {
             return 'Unavailable';
         }
+
+        // du exits non-zero for a folder it could not read while still
+        // printing the total for everything it could, so the output decides
+        // rather than the exit code.
+        const result = await runOnHost({ host: this.connection.host, client }, `du -sh ${quote(folderPath)}`);
+
+        return result.error ? 'Unavailable' : parseFolderSize(result.stdout, result.stderr);
     }
 
     public cleanup(): void {

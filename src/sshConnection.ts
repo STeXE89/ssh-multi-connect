@@ -30,6 +30,7 @@ import {
 } from './utils/settings';
 import { backoffDelays, canReconnectSilently, describeAttempt } from './utils/reconnect';
 import { SSHTreeDecorationProvider, connectionResourceUri, folderResourceUri } from './connectionDecorations';
+import { hostKeyStatus } from './utils/hostKeys';
 import { RemoteFilesView } from './remoteFilesView';
 import { TerminalPathFollower } from './terminalFollow';
 import { TunnelManager } from './tunnels';
@@ -760,16 +761,17 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
     private async ensureKnownHost(connection: ExtendedSSHConnection): Promise<void> {
         const { hostname } = connection;
         const port = connection.port ?? SSH_DEFAULT_PORT;
-        const scannedFingerprint = getHostKeyFromKeyscan(hostname, port);
-        const { exists, key: storedFingerprint } = isKnownHost(hostname);
+        const offered = getHostKeyFromKeyscan(hostname, port);
+        const { keys: recorded } = isKnownHost(hostname);
+        const status = hostKeyStatus(recorded, offered);
 
-        if (!exists) {
-            addKnownHost(hostname, scannedFingerprint, port);
+        if (status === 'unknown') {
+            addKnownHost(hostname, offered, port);
             vscode.window.showInformationMessage(`Host "${hostname}" added to known_hosts.`);
             return;
         }
 
-        if (storedFingerprint && storedFingerprint !== scannedFingerprint) {
+        if (status === 'changed') {
             const selection = await vscode.window.showWarningMessage(
                 `The host key fingerprint for ${hostname} has changed. Do you want to update it?`,
                 'Yes',
@@ -781,7 +783,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             }
 
             removeKnownHost(hostname);
-            addKnownHost(hostname, scannedFingerprint, port);
+            addKnownHost(hostname, offered, port);
         }
     }
 
@@ -1498,7 +1500,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
      */
     public async manageHostKey(treeItem: SSHConnectionTreeItem): Promise<void> {
         const { hostname, host } = treeItem.connection;
-        const { exists, key } = isKnownHost(hostname);
+        const { exists, keys } = isKnownHost(hostname);
 
         if (!exists) {
             vscode.window.showInformationMessage(
@@ -1511,7 +1513,7 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
             `${host} (${hostname})`,
             {
                 modal: true,
-                detail: `Recorded fingerprint:\n${key ?? 'unreadable'}\n\nRemoving it means the next connection accepts whatever key the host offers, so only do it for a host you know has been rebuilt.`,
+                detail: `Recorded ${keys.length === 1 ? 'fingerprint' : 'fingerprints'}:\n${keys.join('\n') || 'unreadable'}\n\nRemoving them means the next connection accepts whatever key the host offers, so only do it for a host you know has been rebuilt.`,
             },
             'Remove from known_hosts'
         );

@@ -64,13 +64,16 @@ export class SSHPseudoterminal implements vscode.Pseudoterminal {
             channel.on('data', (data: Buffer) => {
                 const text = data.toString('utf-8');
 
-                // The sequences stay in the stream: the terminal knows what to
-                // do with them, and stripping them risks cutting real output.
-                for (const directory of this.scanner.push(text)) {
+                // The scanner takes the directory reports out as it finds
+                // them: they belong to this extension, and VS Code otherwise
+                // treats a remote path as the terminal's own.
+                const { directories, text: cleaned } = this.scanner.push(text);
+
+                for (const directory of directories) {
                     this.directoryEmitter.fire(directory);
                 }
 
-                this.writeEmitter.fire(text);
+                this.writeEmitter.fire(cleaned);
             });
             channel.stderr.on('data', (data: Buffer) => this.writeEmitter.fire(data.toString('utf-8')));
             channel.on('close', () => this.closeEmitter.fire());

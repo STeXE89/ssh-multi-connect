@@ -12,7 +12,7 @@ import { utils } from 'ssh2';
 import { AuthProvider, HopPosition, HopTarget, KeyApprover, HostResolver } from './proxyChain';
 import { JumpHop, parseProxyJump, proxyJumpFromCommand } from './utils/proxyJump';
 import { SSHConnection } from './utils/sshConfig';
-import { fingerprintOfKey } from './utils/hostKeys';
+import { fingerprintOfKey, hostKeyStatus } from './utils/hostKeys';
 import { getConnection, isKnownHost, removeKnownHost, rememberHostKey, resolveIdentityFile } from './utils/sshUtils';
 import { readFile } from './utils/fileUtils';
 import { accountLabel, hopPasswordPrompt, hopPassphrasePrompt } from './utils/authPrompts';
@@ -148,13 +148,14 @@ async function passwordCredentials(label: string, position: HopPosition, destina
 export function createKeyApprover(): KeyApprover {
     return async (target: HopTarget, key: Buffer) => {
         const fingerprint = fingerprintOfKey(key);
-        const { exists, key: stored } = isKnownHost(target.host);
+        const { keys: recorded } = isKnownHost(target.host);
+        const status = hostKeyStatus(recorded, [fingerprint]);
 
-        if (exists && stored === fingerprint) {
+        if (status === 'matches') {
             return true;
         }
 
-        if (exists && stored) {
+        if (status === 'changed') {
             const answer = await vscode.window.showWarningMessage(
                 `The host key for ${target.host} has changed. Someone could be intercepting the connection. Accept the new key?`,
                 { modal: true },
@@ -172,7 +173,7 @@ export function createKeyApprover(): KeyApprover {
             return false;
         }
 
-        if (!exists) {
+        if (status === 'unknown') {
             vscode.window.showInformationMessage(`Host "${target.host}" added to known_hosts (${fingerprint}).`);
         }
 

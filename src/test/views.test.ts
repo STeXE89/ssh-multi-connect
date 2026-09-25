@@ -244,3 +244,24 @@ suite('multi-command panel markup', () => {
         assert.ok(read('multiCommandPanel.html').includes('Content-Security-Policy'));
     });
 });
+
+suite('multi-command panel styling', () => {
+    const css = () =>
+        require('fs').readFileSync(
+            require('path').join(__dirname, '../../resources/media/webviews/multiCommandPanel.css'),
+            'utf-8'
+        );
+
+    test('does not stretch the checkbox to the full width', () => {
+        // A checkbox caught by the text-input rule fills the row and pushes
+        // its own label out of the box.
+        const rule = css().match(/select,[\s\S]*?\{[\s\S]*?width: 100%/);
+
+        assert.ok(rule, 'the width rule went missing');
+        assert.ok(rule[0].includes("input:not([type='checkbox'])"), 'checkboxes are caught by the width rule');
+    });
+
+    test('the toggle row lets its text wrap rather than overflow', () => {
+        assert.ok(/\.toggle-text\s*\{[^}]*min-width: 0/.test(css()));
+    });
+});

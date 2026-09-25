@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { createHash } from 'crypto';
-import { fingerprintOfKey, keyAlgorithm, knownHostsLine } from '../utils/hostKeys';
+import { fingerprintOfKey, keyAlgorithm, knownHostsLine, hostKeyStatus } from '../utils/hostKeys';
 
 /** Builds a key blob the way the SSH wire format does. */
 function blob(algorithm: string, body = 'body'): Buffer {
@@ -49,5 +49,38 @@ suite('hostKeys: known_hosts lines', () => {
 
     test('returns nothing for a blob that is not a key', () => {
         assert.strictEqual(knownHostsLine('h', 22, Buffer.from('nonsense')), undefined);
+    });
+});
+
+suite('hostKeys: deciding whether a host changed', () => {
+    const rsa = 'SHA256:9tmvOHjMaX5WVBbkpwreoT';
+    const ecdsa = 'SHA256:byyDSH6leplhrteNgk46iK';
+    const ed25519 = 'SHA256:K7nUe7/9evlnDVBovS+VCH';
+
+    test('a host with nothing recorded is unknown', () => {
+        assert.strictEqual(hostKeyStatus([], [rsa]), 'unknown');
+    });
+
+    test('the same keys match', () => {
+        assert.strictEqual(hostKeyStatus([rsa, ecdsa, ed25519], [rsa, ecdsa, ed25519]), 'matches');
+    });
+
+    test('order does not matter, which is the whole point', () => {
+        // ssh-keyscan opens a connection per key type, so the order it returns
+        // them in follows the network. Comparing the first of each reported a
+        // changed key every time the orders happened to differ.
+        assert.strictEqual(hostKeyStatus([rsa, ecdsa, ed25519], [ed25519, rsa, ecdsa]), 'matches');
+    });
+
+    test('one key in common is enough, as when a host adds a type', () => {
+        assert.strictEqual(hostKeyStatus([rsa], [rsa, ed25519]), 'matches');
+    });
+
+    test('a host that shares none of them has changed', () => {
+        assert.strictEqual(hostKeyStatus([rsa, ecdsa], ['SHA256:completely-different']), 'changed');
+    });
+
+    test('a host offering nothing at all counts as changed, not as matching', () => {
+        assert.strictEqual(hostKeyStatus([rsa], []), 'changed');
     });
 });

@@ -30,6 +30,9 @@ export const CWD_REPORT_SETUP =
 /** How much of a partial sequence to hold before giving up on it. */
 const MAX_PENDING = 4096;
 
+/** The sequences this scanner reads; anything else is output, not a report. */
+const PREFIXES = ['\x1b]7;', '\x1b]1337;CurrentDir='];
+
 /**
  * Reads the directory out of an OSC 7 payload.
  *
@@ -68,32 +71,48 @@ export class CwdScanner {
     /**
      * Feeds a chunk of output through the scanner.
      *
+     * The reports are taken out of the text on the way past. They are meant
+     * for this extension, and VS Code makes its own use of them otherwise: it
+     * records the directory as the terminal's own and starts the next split
+     * terminal there -- a remote path, on the local machine, which fails with
+     * "Starting directory does not exist".
+     *
      * @param chunk Bytes as they arrived from the shell.
-     * @returns Every directory reported in this chunk, in order.
+     * @returns The directories reported, and the output with them removed.
      */
-    push(chunk: string): string[] {
-        const text = this.pending + chunk;
+    push(chunk: string): { directories: string[]; text: string } {
+        const buffer = this.pending + chunk;
         const found: string[] = [];
 
-        // Anything before the last escape is complete; what follows may not be.
+        let cleaned = '';
         let consumed = 0;
         const pattern = /\x1b\]((?:7;)|(?:1337;CurrentDir=))([^\x07\x1b]*)(\x07|\x1b\\)/g;
 
-        for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+        for (let match = pattern.exec(buffer); match; match = pattern.exec(buffer)) {
             const directory = match[1] === '7;' ? directoryFromOsc7(match[2]) : match[2].trim() || undefined;
 
             if (directory) {
                 found.push(directory);
             }
+
+            cleaned += buffer.slice(consumed, match.index);
             consumed = match.index + match[0].length;
         }
 
-        this.pending = this.carry(text.slice(consumed));
-        return found;
+        // Anything that might be the start of another sequence is held back,
+        // so half of one is never shown and never reaches VS Code.
+        const tail = buffer.slice(consumed);
+        this.pending = this.carry(tail);
+
+        return { directories: found, text: cleaned + tail.slice(0, tail.length - this.pending.length) };
     }
 
     /**
-     * Keeps the tail that might be the start of a split sequence.
+     * Keeps the tail that might be the start of one of our sequences.
+     *
+     * Only ours: an escape that cannot become a directory report -- the window
+     * title, say, which every shell sends -- is let through at once. Holding
+     * any escape would swallow that output until the buffer overflowed.
      *
      * @param tail What is left after the last complete sequence.
      * @returns The part worth holding on to.
@@ -105,8 +124,13 @@ export class CwdScanner {
         }
 
         const partial = tail.slice(start);
-        // A sequence this long is not one of ours; drop it rather than grow
-        // without bound on binary output.
-        return partial.length <= MAX_PENDING ? partial : '';
+        if (partial.length > MAX_PENDING) {
+            // Too long to be one of ours; stop growing on binary output.
+            return '';
+        }
+
+        const couldBecomeOurs = PREFIXES.some(prefix => prefix.startsWith(partial) || partial.startsWith(prefix));
+
+        return couldBecomeOurs ? partial : '';
     }
 }

@@ -39,13 +39,13 @@ suite('terminalCwd: scanning a stream', () => {
     test('finds a report among ordinary output', () => {
         const scanner = new CwdScanner();
 
-        assert.deepStrictEqual(scanner.push(`total 8\r\n${osc7('/var/log')}user@host:~$ `), ['/var/log']);
+        assert.deepStrictEqual(scanner.push(`total 8\r\n${osc7('/var/log')}user@host:~$ `).directories, ['/var/log']);
     });
 
     test('finds several in one chunk, in order', () => {
         const scanner = new CwdScanner();
 
-        assert.deepStrictEqual(scanner.push(`${osc7('/a')}x${osc7('/b')}`), ['/a', '/b']);
+        assert.deepStrictEqual(scanner.push(`${osc7('/a')}x${osc7('/b')}`).directories, ['/a', '/b']);
     });
 
     test('carries a sequence split across two reads', () => {
@@ -53,33 +53,33 @@ suite('terminalCwd: scanning a stream', () => {
         const full = osc7('/home/me');
         const cut = Math.floor(full.length / 2);
 
-        assert.deepStrictEqual(scanner.push(full.slice(0, cut)), []);
-        assert.deepStrictEqual(scanner.push(full.slice(cut)), ['/home/me']);
+        assert.deepStrictEqual(scanner.push(full.slice(0, cut)).directories, []);
+        assert.deepStrictEqual(scanner.push(full.slice(cut)).directories, ['/home/me']);
     });
 
     test('accepts the ST terminator as well as BEL', () => {
         const scanner = new CwdScanner();
 
-        assert.deepStrictEqual(scanner.push('\x1b]7;file://host/srv\x1b\\'), ['/srv']);
+        assert.deepStrictEqual(scanner.push('\x1b]7;file://host/srv\x1b\\').directories, ['/srv']);
     });
 
     test("understands iTerm's CurrentDir form", () => {
         const scanner = new CwdScanner();
 
-        assert.deepStrictEqual(scanner.push('\x1b]1337;CurrentDir=/opt\x07'), ['/opt']);
+        assert.deepStrictEqual(scanner.push('\x1b]1337;CurrentDir=/opt\x07').directories, ['/opt']);
     });
 
     test('reports nothing for output that carries no sequence', () => {
         const scanner = new CwdScanner();
 
-        assert.deepStrictEqual(scanner.push('just some text\r\n'), []);
+        assert.deepStrictEqual(scanner.push('just some text\r\n').directories, []);
     });
 
     test('is not confused by other escape sequences', () => {
         const scanner = new CwdScanner();
         const coloured = '\x1b[32mgreen\x1b[0m';
 
-        assert.deepStrictEqual(scanner.push(`${coloured}${osc7('/tmp')}`), ['/tmp']);
+        assert.deepStrictEqual(scanner.push(`${coloured}${osc7('/tmp')}`).directories, ['/tmp']);
     });
 
     test('does not grow without bound on output that never terminates a sequence', () => {
@@ -88,7 +88,7 @@ suite('terminalCwd: scanning a stream', () => {
         scanner.push(`\x1b]${'x'.repeat(8000)}`);
 
         // The next real report still arrives, so nothing is stuck.
-        assert.deepStrictEqual(scanner.push(osc7('/after')), ['/after']);
+        assert.deepStrictEqual(scanner.push(osc7('/after')).directories, ['/after']);
     });
 });
 
@@ -138,6 +138,71 @@ suite('terminalCwd: asking the shell to report', () => {
             cwd: '/tmp',
         });
 
-        assert.deepStrictEqual(new CwdScanner().push(result.stdout), ['/tmp']);
+        assert.deepStrictEqual(new CwdScanner().push(result.stdout).directories, ['/tmp']);
+    });
+});
+
+suite('terminalCwd: keeping the reports out of the terminal', () => {
+    test('removes the sequence from what the terminal is shown', () => {
+        const scanner = new CwdScanner();
+        const { text } = scanner.push(`total 8\r\n${osc7('/var/log')}user@host:~$ `);
+
+        // VS Code reads these as the terminal's own directory and starts the
+        // next split terminal there, locally, where a remote path cannot exist.
+        assert.strictEqual(text, 'total 8\r\nuser@host:~$ ');
+        assert.ok(!text.includes('\x1b]7;'));
+    });
+
+    test('removes several without disturbing what is between them', () => {
+        const scanner = new CwdScanner();
+
+        assert.strictEqual(scanner.push(`${osc7('/a')}middle${osc7('/b')}end`).text, 'middleend');
+    });
+
+    test('leaves ordinary output alone, escape sequences included', () => {
+        const scanner = new CwdScanner();
+        const coloured = '\x1b[32mgreen\x1b[0m';
+
+        assert.strictEqual(scanner.push(coloured).text, coloured);
+    });
+
+    test('shows no half a sequence, holding it until it completes', () => {
+        const scanner = new CwdScanner();
+        const full = osc7('/home/me');
+        const cut = Math.floor(full.length / 2);
+
+        assert.strictEqual(scanner.push(`before${full.slice(0, cut)}`).text, 'before');
+        assert.strictEqual(scanner.push(`${full.slice(cut)}after`).text, 'after');
+    });
+
+    test('gives the held-back text back when it turns out not to be one', () => {
+        const scanner = new CwdScanner();
+
+        assert.strictEqual(scanner.push('text\x1b]').text, 'text');
+        assert.strictEqual(scanner.push('0;a title\x07more').text, '\x1b]0;a title\x07more');
+    });
+});
+
+suite('terminalCwd: not swallowing other escape sequences', () => {
+    test('lets a window title through, split or not', () => {
+        const scanner = new CwdScanner();
+
+        // Every shell sends one of these before each prompt. Held back waiting
+        // to see if it were a directory report, it would never be shown.
+        assert.strictEqual(scanner.push('\x1b]0;user@host: ~\x07$ ').text, '\x1b]0;user@host: ~\x07$ ');
+    });
+
+    test('releases an escape that turns out not to be ours', () => {
+        const scanner = new CwdScanner();
+
+        assert.strictEqual(scanner.push('before\x1b]').text, 'before');
+        assert.strictEqual(scanner.push('0;a title\x07after').text, '\x1b]0;a title\x07after');
+    });
+
+    test('still holds one of ours that has only just begun', () => {
+        const scanner = new CwdScanner();
+
+        assert.strictEqual(scanner.push('before\x1b]7').text, 'before');
+        assert.strictEqual(scanner.push(';file://host/tmp\x07after').text, 'after');
     });
 });

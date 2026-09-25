@@ -68,3 +68,32 @@ export function knownHostsLine(hostname: string, port: number, key: Buffer): str
     const host = port === SSH_DEFAULT_PORT ? hostname : `[${hostname}]:${port}`;
     return `${host} ${algorithm} ${key.toString('base64')}`;
 }
+
+/** What a comparison of stored and offered host keys amounts to. */
+export type HostKeyStatus = 'unknown' | 'matches' | 'changed';
+
+/**
+ * Decides whether a host is still the one this machine recorded.
+ *
+ * A host normally publishes several keys -- ed25519, ecdsa and rsa -- and
+ * `ssh-keyscan` opens a separate connection for each, so the order they come
+ * back in follows the network rather than anything stable. Comparing one
+ * fingerprint from each side therefore reports a changed key whenever the
+ * orders happen to differ, which is a false alarm about the one thing a user
+ * must be able to trust.
+ *
+ * Any key in common means the host is the one we knew: a server that has
+ * genuinely been rebuilt shares none of them.
+ *
+ * @param stored The fingerprints recorded in known_hosts.
+ * @param offered The fingerprints the host is publishing now.
+ * @returns Whether the host is unknown, the same, or genuinely different.
+ */
+export function hostKeyStatus(stored: readonly string[], offered: readonly string[]): HostKeyStatus {
+    if (stored.length === 0) {
+        return 'unknown';
+    }
+
+    const known = new Set(stored);
+    return offered.some(fingerprint => known.has(fingerprint)) ? 'matches' : 'changed';
+}

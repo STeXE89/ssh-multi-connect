@@ -15,6 +15,13 @@ All notable changes to the "ssh-multi-connect" extension will be documented in t
 ### Fixed
 
 - A host whose `ssh_config` names its own `IdentityFile` authenticated with a different key: the path was replaced with this extension's own `~/.ssh/<host>_key` convention.
+- Every connection to a host asked whether to update its key. A host publishes several, and only the first of each side's was compared, so any difference in order looked like a change.
+- Splitting a terminal with VS Code's own button failed with "Starting directory does not exist": the directory reports reached VS Code, which took the remote path for the terminal's own.
+- A window title, which every shell sends before each prompt, could be held back and never shown.
+- The line that sets up directory reporting was shown in the terminal.
+- Following the terminal moved the tree's root to that folder, hiding everything above it; it is revealed instead.
+- The split-terminal checkbox was stretched across the panel, pushing its own label out of view.
+- Selecting a folder showed no details when `du` could not read part of it, though it had reported a usable total.
 - A `Match` block was read as part of the host above it, so that host showed settings that were not its own — and rewriting it, which happens on any edit, deleted the `Match` block from `ssh_config` entirely.
 - A test could fail for the machine's sake rather than its own.
 

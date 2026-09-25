@@ -31,7 +31,9 @@ h3 + * {
 
 select,
 textarea,
-input {
+/* Text-like inputs only: a checkbox stretched to the full width pushes its
+   own label out of the row. */
+input:not([type='checkbox']):not([type='radio']) {
     width: 100%;
     padding: 4px 6px;
     background-color: var(--vscode-input-background);
@@ -104,6 +106,7 @@ button:disabled {
 .toggle input {
     /* Nudged down so it sits on the title's line, not above it. */
     margin: 2px 0 0;
+    width: auto;
     cursor: pointer;
     flex: none;
 }
@@ -112,6 +115,8 @@ button:disabled {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    /* Lets the text wrap inside the row rather than overflowing it. */
+    min-width: 0;
 }
 
 .toggle-title {
