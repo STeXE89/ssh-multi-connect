@@ -283,3 +283,65 @@ suite('sshConfig: hasHost', () => {
         assert.strictEqual(hasHost('Host *\n  ForwardAgent yes\n', '*'), true);
     });
 });
+
+suite('sshConfig: Match blocks', () => {
+    const config = [
+        'Host web',
+        '  HostName 10.0.0.5',
+        '',
+        'Match host bastion',
+        '  User admin',
+        '  IdentityFile ~/.ssh/bastion_key',
+        '',
+        'Host other',
+        '  HostName 10.0.0.6',
+    ].join('\n');
+
+    test('a Match block is not read as a host', () => {
+        assert.deepStrictEqual(
+            parseSshConfig(config).map(connection => connection.host),
+            ['web', 'other']
+        );
+    });
+
+    test('its directives are not attributed to the host above it', () => {
+        const [web] = parseSshConfig(config);
+
+        // Without Match ending the block, web reported the admin user and key
+        // belonging to the Match section.
+        assert.strictEqual(web.user, undefined);
+        assert.strictEqual(web.identityFile, undefined);
+    });
+
+    test('rewriting the host above it leaves it where it was', () => {
+        const updated = upsertConnection(config, { host: 'web', hostname: '10.0.0.5' });
+
+        assert.ok(updated.includes('Match host bastion'));
+        assert.ok(updated.includes('  User admin'));
+        assert.ok(updated.includes('  IdentityFile ~/.ssh/bastion_key'));
+    });
+
+    test('removing the host above it leaves it where it was', () => {
+        const updated = removeHost(config, 'web');
+
+        assert.ok(updated.includes('Match host bastion'));
+        assert.ok(updated.includes('  IdentityFile ~/.ssh/bastion_key'));
+        assert.ok(!updated.includes('Host web'));
+    });
+
+    test('a Match block before any Host is kept too', () => {
+        const leading = ['Match final', '  Compression yes', '', 'Host web', '  HostName 10.0.0.5'].join('\n');
+
+        const updated = upsertConnection(leading, { host: 'web', hostname: '10.0.0.9' });
+
+        assert.ok(updated.includes('Match final'));
+        assert.ok(updated.includes('  Compression yes'));
+        assert.ok(updated.includes('HostName 10.0.0.9'));
+    });
+
+    test('accepts the Key=Value form, as ssh does', () => {
+        const equals = ['Host web', '  HostName 10.0.0.5', 'Match=host bastion', '  User admin'].join('\n');
+
+        assert.strictEqual(parseSshConfig(equals)[0].user, undefined);
+    });
+});

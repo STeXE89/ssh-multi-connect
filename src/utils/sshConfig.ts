@@ -45,11 +45,21 @@ export interface SSHConnection {
 
 /** A `Host` line plus every line up to the next `Host` line. */
 interface HostBlock {
+    /** Empty for a `Match` block, which names no host. */
     patterns: string[];
     lines: string[];
 }
 
 const HOST_LINE = /^[ \t]*Host(?:[ \t]*=[ \t]*|[ \t]+)(.+?)[ \t]*$/i;
+/**
+ * `Match` ends the block above it just as `Host` does.
+ *
+ * Without this its directives are read as the previous host's -- so a host
+ * shows settings that are not its own -- and, worse, rewriting that host
+ * replaces the block with one built from the model, taking the whole `Match`
+ * section out of the user's config with it.
+ */
+const MATCH_LINE = /^[ \t]*Match(?:[ \t]*=[ \t]*|[ \t]+)(.+?)[ \t]*$/i;
 const DIRECTIVE_LINE = /^[ \t]*([A-Za-z][A-Za-z0-9-]*)(?:[ \t]*=[ \t]*|[ \t]+)(.+?)[ \t]*$/;
 const VFOLDER_TAG_LINE = /^[ \t]*#[ \t]*vFolderTag:[ \t]*(.*?)[ \t]*$/i;
 
@@ -91,11 +101,15 @@ function splitBlocks(content: string): { preamble: string[]; blocks: HostBlock[]
 
     for (const line of content.split('\n')) {
         const patterns = matchHostLine(line);
-        if (patterns) {
+        const isMatch = MATCH_LINE.test(line);
+
+        if (patterns || isMatch) {
             if (current) {
                 blocks.push(current);
             }
-            current = { patterns, lines: [line] };
+            // A Match block carries no patterns, which is what marks it as
+            // something to copy through rather than to read as a host.
+            current = { patterns: patterns ?? [], lines: [line] };
         } else if (current) {
             current.lines.push(line);
         } else {
@@ -247,7 +261,8 @@ export function parseSshConfig(content: string): SSHConnection[] {
 
     for (const block of blocks) {
         const host = block.patterns[0];
-        if (isWildcard(host)) {
+        // A Match block has no host to be.
+        if (host === undefined || isWildcard(host)) {
             continue;
         }
 

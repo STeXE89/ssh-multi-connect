@@ -10,11 +10,17 @@ This extension 'ssh-multi-connect' allows you to group SSH connections into fold
 - Open remote files in the editor and save changes back to the server.
 - Organize SSH connections into folders, with drag and drop.
 - Execute commands on multiple hosts simultaneously.
+- Open more than one shell on a host with **New Terminal**, grouped together in one
+  split terminal. VS Code's own split button cannot do this: it has no way to copy an
+  extension's terminal, so it opens a local shell instead.
+- Inspect and remove a recorded host key.
+- Recent multi-host commands are suggested rather than retyped.
 - Open local and remote SSH tunnels, with start/stop control and live state.
 - Inspect remote files and folders, and edit their permissions and ownership.
 - Create, rename and delete remote files and folders from the right-click menu.
 - Retry an operation with sudo when the remote user lacks permission.
 - Run one command across hosts and read the collected output in one report.
+- Search a host's files with `grep`, run on the host, and open a match where it is.
 - Upload files and folders by dragging them onto the remote tree, or by picking them.
 - Move remote files and folders by dragging them within the tree.
 - Select several remote entries to move, copy, download, or delete them together.
@@ -101,7 +107,17 @@ The host list is your `~/.ssh/config`, read the way `ssh` reads it:
 `Include` directives are followed, globs and all, and a leading `~` in a path
 is expanded. A host defined in an included file is written back to that file,
 not copied into the main config. A block that itself contains an `Include` is
-left alone by the editor, since rewriting it would drop that line.
+left alone by the editor, since rewriting it would drop that line. A `Match` block
+is left alone too: it is not read as a host, and it survives any edit to the hosts
+around it.
+
+## When something goes wrong
+
+**Output → SSH Multi Connect** carries what the extension is doing: connections
+opening and closing, tunnels starting, host keys changing, and anything that
+failed. **SSH Multi Connect: Show Log** in the command palette opens it. The
+level is VS Code's own, in the Output view's gear menu -- raise it to Debug to
+see the quieter lines.
 
 ## Extension Settings
 
@@ -119,23 +135,28 @@ once -- they will not chase each other.
 
   Because it is typed, it goes wherever that terminal's input goes: if a program is
   running there -- an editor, `top`, `less` -- or a command is half typed, the `cd`
-  lands in that instead. It reaches the connection's own terminal, not the split group
-  the multi-command panel opens. Every shell understands `cd`, so this one works on
-  all of them.
+  lands in that instead. A host can have several shells: the `cd` goes to whichever
+  of them is in front of you, or to the connection's own when the active terminal
+  belongs to something else. The multi-command panel's group is left alone. Every
+  shell understands `cd`, so this one works on all of them.
 
 * `sshMultiConnect.followTerminalDirectory` (default `false`): **terminal to tree**.
   Every terminal opened from then on runs one setup line as it starts, which makes the
-  shell report its folder before each prompt; the tree then follows. You will see that
-  line in the terminal, and the shell carries an extra function on `PROMPT_COMMAND`
-  (bash) or in `precmd_functions` (zsh) until it exits. Terminals already open are not
-  touched -- reopen one to have it report.
+  shell report its folder before each prompt; the tree then reveals and selects that
+  folder, keeping everything above it in view rather than moving its root. The line
+  itself is hidden from the terminal, though it stays in the shell's history, and the
+  shell carries an extra function on `PROMPT_COMMAND` (bash) or in
+  `precmd_functions` (zsh) until it exits. Terminals already open are not touched --
+  reopen one to have it report.
 
   The tree follows any change the shell reports, including one made by a script, by
-  `pushd`, or by a `cd` inside a command you ran. **Only bash and zsh can report**:
+  `pushd`, or by a `cd` inside a command you ran -- from whichever shell you are
+  looking at, when a host has more than one. **Only bash and zsh can report**:
   on dash, ash, fish, csh and anything else the setup line does nothing at all,
   silently, and the tree will not follow.
 
-* `sshMultiConnect.splitTerminalsForMultiCommand` (default `true`): send a
+* `sshMultiConnect.splitTerminalsForMultiCommand` (default `true`, and a
+  checkbox in the panel itself): send a
   multi-host command to a split terminal group, one pane per selected host, so every
   host's output is visible at once. These are terminals the panel opens itself, a
   second shell on each connection; closing one does not disconnect the host. Turn it
@@ -179,6 +200,32 @@ once -- they will not chase each other.
 ## Release Notes
 
 Below some last release note, for more details see the CHANGELOG.md
+
+## [1.0.0] - 2026/09/28
+
+### Added
+
+- **Search on Host...** runs `grep` on the host and opens a match at its line.
+- Following works with whichever of a host's shells you are looking at, not only its first.
+- **Host Key...** shows the fingerprint recorded for a host, and removes it when the host has been rebuilt.
+- The multi-command panel suggests the commands you have sent before.
+- **New Terminal** on a connected host opens another shell, split alongside the ones it already has.
+- A log in **Output → SSH Multi Connect**, and **Show Log** to open it.
+- A checkbox in the multi-command panel for the split terminal group, so it can be turned off without opening settings.
+- A word of explanation the first time VS Code's split button opens a local shell beside a remote one.
+
+### Fixed
+
+- A host whose `ssh_config` names its own `IdentityFile` authenticated with a different key: the path was replaced with this extension's own `~/.ssh/<host>_key` convention.
+- Every connection to a host asked whether to update its key. A host publishes several, and only the first of each side's was compared, so any difference in order looked like a change.
+- Splitting a terminal with VS Code's own button failed with "Starting directory does not exist": the directory reports reached VS Code, which took the remote path for the terminal's own.
+- A window title, which every shell sends before each prompt, could be held back and never shown.
+- The line that sets up directory reporting was shown in the terminal.
+- Following the terminal moved the tree's root to that folder, hiding everything above it; it is revealed instead.
+- The split-terminal checkbox was stretched across the panel, pushing its own label out of view.
+- Selecting a folder showed no details when `du` could not read part of it, though it had reported a usable total.
+- A `Match` block was read as part of the host above it, so that host showed settings that were not its own — and rewriting it, which happens on any edit, deleted the `Match` block from `ssh_config` entirely.
+- A test could fail for the machine's sake rather than its own.
 
 ## [0.0.10] - 2026/09/16
 

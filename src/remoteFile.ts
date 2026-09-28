@@ -6,6 +6,8 @@ import * as sftpUtils from './utils/sftpUtils';
 import * as fs from 'fs';
 import { quote } from './utils/shell';
 import { describeUpload } from './utils/dropTargets';
+import { parseFolderSize } from './utils/folderSize';
+import { runOnHost } from './multiCommandRun';
 import { MoveSource, describeMove, planMove } from './utils/remoteMove';
 import { planUpload, describeSkipped } from './utils/uploadPlan';
 import { PrivilegeEscalation, isPermissionDenied, sudoCommands } from './utils/privilege';
@@ -20,6 +22,7 @@ import {
 } from './fileDetailsView';
 import { SelectedEntry, summariseSelection } from './utils/selectionSummary';
 import { ExtendedSSHConnection } from './sshConnection';
+import { log } from './log';
 
 /** Extracts a readable message from an unknown thrown value. */
 function errorText(error: unknown): string {
@@ -201,6 +204,44 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         }
 
         return Promise.resolve([]);
+    }
+
+    /**
+     * The folder an item sits in, so the tree can be revealed down to it.
+     *
+     * VS Code walks upwards from an item to find how to expand to it. Items
+     * are matched by id, which is the resource URI, so an item built here
+     * stands for the same node the tree already holds.
+     *
+     * @param element The item whose parent is wanted.
+     * @returns The parent item, or undefined at the root of this tree.
+     */
+    getParent(element: vscode.TreeItem): vscode.TreeItem | undefined {
+        if (!(element instanceof RemoteFileTreeItem)) {
+            return undefined;
+        }
+
+        const parent = path.posix.dirname(element.resourceUri.path);
+        if (parent === element.resourceUri.path || !parent.startsWith(this.currentPath)) {
+            return undefined;
+        }
+
+        return this.itemFor(parent);
+    }
+
+    /**
+     * Builds the item standing for a folder on this connection.
+     *
+     * @param remotePath The folder.
+     * @returns A collapsed directory item.
+     */
+    public itemFor(remotePath: string): RemoteFileTreeItem {
+        return new RemoteFileTreeItem(
+            this.createResourceUri(path.posix.dirname(remotePath), path.posix.basename(remotePath)),
+            vscode.TreeItemCollapsibleState.Collapsed,
+            this.connection,
+            true
+        );
     }
 
     private async fetchRemoteFiles(remotePath: string): Promise<RemoteFileTreeItem[]> {
@@ -406,7 +447,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
                 this.tempFileMap.delete(filePath);
             } catch (err) {
-                console.error(`Failed to delete temporary file: ${filePath}`, err);
+                log.warn(`Could not delete the temporary file ${filePath}`, err);
             }
         }
     }
@@ -447,7 +488,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         // still upload. onDidCloseTextDocument cleans it up.
     }
 
-    public async openRemoteFile(resourceUri: vscode.Uri) {
+    public async openRemoteFile(resourceUri: vscode.Uri, line?: number) {
         try {
             if (!this.sftp) {
                 this.sftp = await sftpUtils.getSFTPClient(this.connection.client!);
@@ -456,7 +497,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
             const stat = await sftpUtils.getRemoteStat(this.sftp, resourceUri.path);
 
             if (stat.isFile()) {
-                await this.openRemoteFileInEditor(resourceUri);
+                await this.openRemoteFileInEditor(resourceUri, line);
             } else {
                 vscode.window.showErrorMessage('Unsupported file type.');
             }
@@ -466,7 +507,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         }
     }
 
-    private async openRemoteFileInEditor(resourceUri: vscode.Uri) {
+    private async openRemoteFileInEditor(resourceUri: vscode.Uri, line?: number) {
         // The remote directory is folded in so two files sharing a basename on
         // one host do not collide locally.
         const remoteDirDigest = createHash('sha1')
@@ -505,7 +546,17 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
 
         try {
             const document = await vscode.workspace.openTextDocument(localUri);
-            await vscode.window.showTextDocument(document);
+
+            // A search result names a line; anything else opens at the top.
+            const selection =
+                line === undefined
+                    ? undefined
+                    : new vscode.Range(
+                          new vscode.Position(Math.max(0, line - 1), 0),
+                          new vscode.Position(Math.max(0, line - 1), 0)
+                      );
+
+            await vscode.window.showTextDocument(document, { selection });
         } catch (error) {
             // openTextDocument refuses binary content; let VS Code pick an
             // editor for it instead of forcing a text one.
@@ -984,44 +1035,17 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
     }
 
     private async calculateFolderSize(folderPath: string): Promise<string> {
-        try {
-            if (!this.connection.client) {
-                throw new Error('SSH connection is not established.');
-            }
-
-            return new Promise((resolve, reject) => {
-                this.connection.client?.exec(`du -sh ${quote(folderPath)}`, (err: any, stream: any) => {
-                    if (err) {
-                        reject(`Error executing remote command: ${err.message}`);
-                        return;
-                    }
-
-                    let output = '';
-                    let errorOutput = '';
-
-                    stream.on('data', (data: Buffer) => {
-                        output += data.toString();
-                    });
-
-                    stream.stderr.on('data', (data: Buffer) => {
-                        errorOutput += data.toString();
-                    });
-
-                    stream.on('close', (code: number) => {
-                        if (code !== 0) {
-                            reject(new Error(errorOutput.trim() || `du exited with code ${code}`));
-                        } else {
-                            const size = output.split('\t')[0].trim();
-                            resolve(size);
-                        }
-                    });
-                });
-            });
-        } catch {
-            // Reported in the panel rather than as a notification: selecting a
-            // folder must not raise a popup on a host without `du`.
+        const client = this.connection.client;
+        if (!client) {
             return 'Unavailable';
         }
+
+        // du exits non-zero for a folder it could not read while still
+        // printing the total for everything it could, so the output decides
+        // rather than the exit code.
+        const result = await runOnHost({ host: this.connection.host, client }, `du -sh ${quote(folderPath)}`);
+
+        return result.error ? 'Unavailable' : parseFolderSize(result.stdout, result.stderr);
     }
 
     public cleanup(): void {
@@ -1049,7 +1073,7 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
             // escape as an unhandled promise rejection.
             void fileUtils
                 .deleteFile(filePath)
-                .catch(err => console.error(`Failed to delete temporary file: ${filePath}`, err));
+                .catch(err => log.warn(`Could not delete the temporary file ${filePath}`, err));
         }
 
         this.tempFileMap.clear();

@@ -1,8 +1,9 @@
 import * as assert from 'assert';
 import * as net from 'net';
-import { Client, Server, utils } from 'ssh2';
+import { Client, Server } from 'ssh2';
 import { TunnelManager } from '../tunnels';
 import { TunnelConfig, LOOPBACK } from '../utils/tunnelModel';
+import { testHostKey } from './sshTestKey';
 
 /**
  * Exercises the real ssh2 forwarding path.
@@ -60,11 +61,10 @@ interface Harness {
 async function sshHarness(
     onTcpip: (info: { destIP: string; destPort: number }) => { echoTo?: number; refuse?: boolean }
 ): Promise<Harness> {
-    const hostKey = utils.generateKeyPairSync('ed25519');
     const requested: { host: string; port: number }[] = [];
     const openSockets = new Set<net.Socket>();
 
-    const server = new Server({ hostKeys: [hostKey.private] }, connection => {
+    const server = new Server({ hostKeys: [testHostKey()] }, connection => {
         connection.on('authentication', ctx => ctx.accept());
         connection.on('ready', () => undefined);
 

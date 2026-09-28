@@ -31,7 +31,9 @@ h3 + * {
 
 select,
 textarea,
-input {
+/* Text-like inputs only: a checkbox stretched to the full width pushes its
+   own label out of the row. */
+input:not([type='checkbox']):not([type='radio']) {
     width: 100%;
     padding: 4px 6px;
     background-color: var(--vscode-input-background);
@@ -78,4 +80,51 @@ button:disabled {
     line-height: 1.35;
     color: var(--vscode-descriptionForeground);
     margin-top: 6px;
+}
+
+/* A row rather than a stray checkbox, so it reads as a control with a
+   consequence and not as a note beside the command box. */
+.toggle {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, transparent));
+    border-radius: 3px;
+    background-color: var(--vscode-input-background);
+    cursor: pointer;
+}
+
+.toggle:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.toggle:focus-within {
+    outline: 1px solid var(--vscode-focusBorder);
+}
+
+.toggle input {
+    /* Nudged down so it sits on the title's line, not above it. */
+    margin: 2px 0 0;
+    width: auto;
+    cursor: pointer;
+    flex: none;
+}
+
+.toggle-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    /* Lets the text wrap inside the row rather than overflowing it. */
+    min-width: 0;
+}
+
+.toggle-title {
+    line-height: 1.3;
+}
+
+.toggle-hint {
+    font-size: 0.9em;
+    line-height: 1.35;
+    color: var(--vscode-descriptionForeground);
 }

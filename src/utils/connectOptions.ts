@@ -93,3 +93,21 @@ export function isAuthFailure(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
     return /authentication method|permission denied|authentication failed/i.test(message);
 }
+
+/**
+ * Chooses the key to authenticate with.
+ *
+ * What `ssh_config` names wins. This extension also has a convention of its
+ * own -- `~/.ssh/<host>_key`, for connections it created and pasted a key into
+ * -- but that is only a fallback: substituting it for a path the user wrote
+ * means authenticating with a different key than the config asks for, which
+ * fails in a way that looks like the server's fault.
+ *
+ * @param configured The `IdentityFile` from ssh_config, if there is one.
+ * @param conventional Produces this extension's own path, only when needed.
+ * @returns The key file to read.
+ */
+export function chooseIdentityFile(configured: string | undefined, conventional: () => string): string {
+    const named = configured?.trim();
+    return named ? named : conventional();
+}

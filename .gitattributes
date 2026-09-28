@@ -1,0 +1,3 @@
+# Prettier is configured for LF, so the checkout must be LF everywhere --
+# otherwise a Windows checkout fails the format check on every file.
+* text=auto eol=lf

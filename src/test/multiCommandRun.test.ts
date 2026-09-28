@@ -1,7 +1,8 @@
 import * as assert from 'assert';
 import * as net from 'net';
-import { Client, Server, utils } from 'ssh2';
+import { Client, Server } from 'ssh2';
 import { runOnHost, runOnHosts } from '../multiCommandRun';
+import { testHostKey } from './sshTestKey';
 
 /**
  * Exercises the real exec path.
@@ -27,9 +28,7 @@ interface Harness {
 }
 
 async function sshHarness(reply: (command: string) => Reply): Promise<Harness> {
-    const hostKey = utils.generateKeyPairSync('ed25519');
-
-    const server = new Server({ hostKeys: [hostKey.private] }, connection => {
+    const server = new Server({ hostKeys: [testHostKey()] }, connection => {
         connection.on('authentication', ctx => ctx.accept());
         connection.on('error', () => undefined);
 

@@ -12,6 +12,7 @@ import * as https from 'https';
 import * as vscode from 'vscode';
 import { ChannelSuggestion, describeSuggestion, parseGalleryVersions, suggestChannel } from './utils/releaseCheck';
 import { suggestVersionChannel } from './utils/settings';
+import { log } from './log';
 
 /** The gallery's query endpoint. */
 const GALLERY = 'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery';
@@ -68,7 +69,7 @@ export async function checkReleaseChannel(context: vscode.ExtensionContext): Pro
 
         await offer(context, suggestion, installed);
     } catch (error) {
-        console.log('Release channel check skipped:', error instanceof Error ? error.message : error);
+        log.debug('Release channel check skipped', error);
     }
 }
 

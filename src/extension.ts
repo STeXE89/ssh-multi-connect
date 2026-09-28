@@ -23,15 +23,19 @@ import { CommandResultsDocuments, RESULTS_SCHEME } from './commandResultsDocumen
 import { copyToHost } from './remoteCopyUi';
 import { downloadRemote } from './remoteDownloadUi';
 import { uploadToRemote } from './remoteUploadUi';
+import { searchRemote } from './remoteSearchUi';
 import { checkReleaseChannel } from './releaseCheck';
 import { runCommandOnHosts } from './multiCommandUi';
 import { SSHTunnelTreeItem } from './tunnelUi';
 import { followPathInTerminal } from './utils/settings';
 import { FileDetailsViewProvider } from './fileDetailsView';
 import { SSHTreeDragAndDropController } from './connectionDragAndDrop';
+import { initLogging, log, showLog } from './log';
 
 export function activate(context: vscode.ExtensionContext) {
     setExtensionContext(context);
+    initLogging(context);
+    log.info(`SSH Multi Connect ${context.extension.packageJSON?.version ?? ''} starting.`);
     checkSshTooling();
 
     // Not awaited: a marketplace that is slow or unreachable must not hold up
@@ -82,6 +86,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(remoteFilesView);
     sshViewProvider.setRemoteFilesView(remoteFilesView);
     sshViewProvider.setPathFollower(pathFollower);
+    context.subscriptions.push(...sshViewProvider.watchForLocalSplits());
 
     const decorationProvider = new SSHTreeDecorationProvider(
         (connectionId: string) =>
@@ -129,7 +134,7 @@ function showRemoteItemDetails(selection: readonly vscode.TreeItem[]): void {
     const shown = entries.length === 1 ? provider?.showDetails(entries[0]) : provider?.showSelectionSummary(entries);
 
     shown?.catch((error: unknown) => {
-        console.error('Could not show details for the selection:', error);
+        log.error('Could not show details for the selection', error);
     });
 }
 
@@ -149,12 +154,25 @@ function followSelectionInTerminal(
         return;
     }
 
-    const terminal = sshViewProvider.getTerminal(item.connection.id);
+    // The shell in front of the user, which is not always the connection's
+    // first one now that a host can have several.
+    const terminal = sshViewProvider.shellToFollow(item.connection.id);
     if (!terminal) {
         return;
     }
 
-    follower.follow(item.connection.id, item.resourceUri.path, item.isDirectory, text => terminal.sendText(text));
+    const sent = follower.follow(item.connection.id, item.resourceUri.path, item.isDirectory, text =>
+        terminal.sendText(text)
+    );
+
+    if (sent) {
+        // Which of a host's shells received a cd is otherwise impossible to
+        // see from outside, so it is available by raising the log level.
+        log.debug(
+            `Followed ${item.resourceUri.path} into "${terminal.name}" ` +
+                `(active terminal: "${vscode.window.activeTerminal?.name ?? 'none'}").`
+        );
+    }
 }
 
 function createSSHTreeView(
@@ -258,6 +276,14 @@ function registerCommands(
                 withRemoteProvider(node, provider => provider.deleteItem(selected(node, selection))),
         },
         {
+            command: 'sshMultiConnect.manageHostKey',
+            callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.manageHostKey(treeItem),
+        },
+        {
+            command: 'sshMultiConnect.newTerminal',
+            callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.newTerminal(treeItem),
+        },
+        {
             command: 'sshMultiConnect.addTunnel',
             callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.addTunnel(treeItem),
         },
@@ -277,12 +303,35 @@ function registerCommands(
             command: 'sshMultiConnect.removeTunnel',
             callback: (item: SSHTunnelTreeItem) => tunnels.remove(item.connectionId, item.entry.config.id),
         },
+        { command: 'sshMultiConnect.showLog', callback: () => showLog() },
         {
             command: 'sshMultiConnect.openSettings',
             // Filtering by the extension's own id shows exactly its settings,
             // and survives a rename of the publisher or the extension.
             callback: () =>
                 vscode.commands.executeCommand('workbench.action.openSettings', `@ext:${context.extension.id}`),
+        },
+        {
+            command: 'sshMultiConnect.searchRemote',
+            callback: (node?: RemoteFileTreeItem | SSHConnectionTreeItem) => {
+                if (node instanceof RemoteFileTreeItem) {
+                    const directory = node.isDirectory
+                        ? node.resourceUri.path
+                        : node.resourceUri.path.slice(0, node.resourceUri.path.lastIndexOf('/')) || '/';
+                    return searchRemote(node.connection, directory);
+                }
+
+                const connection =
+                    node?.connection ??
+                    sshViewProvider.connections.find(c => c.id === sshViewProvider.activeRemoteConnectionId);
+                if (!connection) {
+                    vscode.window.showInformationMessage('Connect to a host to search it.');
+                    return undefined;
+                }
+
+                const provider = RemoteFileProvider.getProviderByConnectionId(connection.id);
+                return searchRemote(connection, provider?.rootPath ?? '/');
+            },
         },
         {
             command: 'sshMultiConnect.uploadToRemote',
@@ -455,7 +504,7 @@ function registerTreeAndWebviewProviders(context: vscode.ExtensionContext, sshVi
         vscode.window.registerWebviewViewProvider('multiCommandView', {
             resolveWebviewView: webviewView => {
                 const connectedConnections = sshViewProvider.connections.filter(conn => conn.client);
-                const multiCommandPanel = new MultiCommandPanel(webviewView, connectedConnections);
+                const multiCommandPanel = new MultiCommandPanel(webviewView, connectedConnections, context.globalState);
 
                 sshViewProvider.setMultiCommandPanel(multiCommandPanel);
                 sshViewProvider.refresh();

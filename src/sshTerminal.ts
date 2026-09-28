@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Client, ClientChannel } from 'ssh2';
-import { CWD_REPORT_SETUP, CwdScanner } from './utils/terminalCwd';
+import { CWD_REPORT_SETUP, CwdScanner, EchoSuppressor } from './utils/terminalCwd';
+import { log } from './log';
 
 /** Fallback terminal size used before VS Code reports real dimensions. */
 const DEFAULT_ROWS = 24;
@@ -27,15 +28,23 @@ export class SSHPseudoterminal implements vscode.Pseudoterminal {
     private channel?: ClientChannel;
     private closed = false;
     private readonly scanner = new CwdScanner();
+    /** Removes the setup line's echo, when one was sent. */
+    private readonly echo: EchoSuppressor;
 
     /**
      * @param client The connection to open a shell on.
      * @param reportDirectory Whether to ask the shell to report where it is.
      */
+    /** Set once the setup line has been taken out, so it is said once. */
+    private reportedHiding = false;
+
     constructor(
         private readonly client: Client,
-        private readonly reportDirectory = false
-    ) {}
+        private readonly reportDirectory = false,
+        private readonly label = 'shell'
+    ) {
+        this.echo = new EchoSuppressor(reportDirectory ? CWD_REPORT_SETUP : '');
+    }
 
     /**
      * Opens the remote shell channel once VS Code shows the terminal.
@@ -60,17 +69,30 @@ export class SSHPseudoterminal implements vscode.Pseudoterminal {
             }
 
             this.channel = channel;
+            log.info(`Remote shell opened for ${this.label}.`);
 
             channel.on('data', (data: Buffer) => {
                 const text = data.toString('utf-8');
 
-                // The sequences stay in the stream: the terminal knows what to
-                // do with them, and stripping them risks cutting real output.
-                for (const directory of this.scanner.push(text)) {
+                // The scanner takes the directory reports out as it finds
+                // them: they belong to this extension, and VS Code otherwise
+                // treats a remote path as the terminal's own.
+                const { directories, text: cleaned } = this.scanner.push(text);
+
+                for (const directory of directories) {
                     this.directoryEmitter.fire(directory);
                 }
 
-                this.writeEmitter.fire(text);
+                // The setup line's own echo is another matter -- nobody needs
+                // to read it.
+                const shown = this.echo.push(cleaned);
+
+                if (shown.length !== cleaned.length && !this.reportedHiding) {
+                    this.reportedHiding = true;
+                    log.debug(`${this.label}: hid the directory-reporting setup line.`);
+                }
+
+                this.writeEmitter.fire(shown);
             });
             channel.stderr.on('data', (data: Buffer) => this.writeEmitter.fire(data.toString('utf-8')));
             channel.on('close', () => this.closeEmitter.fire());

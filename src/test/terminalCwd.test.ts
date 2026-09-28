@@ -1,6 +1,18 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
 import { spawnSync } from 'child_process';
-import { CwdScanner, directoryFromOsc7, CWD_REPORT_SETUP } from '../utils/terminalCwd';
+import { CwdScanner, directoryFromOsc7, CWD_REPORT_SETUP, EchoSuppressor } from '../utils/terminalCwd';
+
+// The shell reports the directory it is actually in, and on macOS /tmp is a
+// symlink to /private/tmp -- so the name to expect is the resolved one.
+const TEMP = fs.realpathSync(os.tmpdir());
+
+// These read a real bash. The setup line is only ever sent to a remote shell,
+// and a bash on Windows answers in MSYS paths -- /c/Users/... for a directory
+// it was handed as C:\Users\... -- which is not what any remote would say, so
+// there is nothing to learn from asking it.
+const canAskShell = process.platform !== 'win32' && spawnSync('bash', ['-c', 'exit 0']).status === 0;
 
 const osc7 = (path: string) => `\x1b]7;file://host${path}\x07`;
 
@@ -39,13 +51,13 @@ suite('terminalCwd: scanning a stream', () => {
     test('finds a report among ordinary output', () => {
         const scanner = new CwdScanner();
 
-        assert.deepStrictEqual(scanner.push(`total 8\r\n${osc7('/var/log')}user@host:~$ `), ['/var/log']);
+        assert.deepStrictEqual(scanner.push(`total 8\r\n${osc7('/var/log')}user@host:~$ `).directories, ['/var/log']);
     });
 
     test('finds several in one chunk, in order', () => {
         const scanner = new CwdScanner();
 
-        assert.deepStrictEqual(scanner.push(`${osc7('/a')}x${osc7('/b')}`), ['/a', '/b']);
+        assert.deepStrictEqual(scanner.push(`${osc7('/a')}x${osc7('/b')}`).directories, ['/a', '/b']);
     });
 
     test('carries a sequence split across two reads', () => {
@@ -53,33 +65,33 @@ suite('terminalCwd: scanning a stream', () => {
         const full = osc7('/home/me');
         const cut = Math.floor(full.length / 2);
 
-        assert.deepStrictEqual(scanner.push(full.slice(0, cut)), []);
-        assert.deepStrictEqual(scanner.push(full.slice(cut)), ['/home/me']);
+        assert.deepStrictEqual(scanner.push(full.slice(0, cut)).directories, []);
+        assert.deepStrictEqual(scanner.push(full.slice(cut)).directories, ['/home/me']);
     });
 
     test('accepts the ST terminator as well as BEL', () => {
         const scanner = new CwdScanner();
 
-        assert.deepStrictEqual(scanner.push('\x1b]7;file://host/srv\x1b\\'), ['/srv']);
+        assert.deepStrictEqual(scanner.push('\x1b]7;file://host/srv\x1b\\').directories, ['/srv']);
     });
 
     test("understands iTerm's CurrentDir form", () => {
         const scanner = new CwdScanner();
 
-        assert.deepStrictEqual(scanner.push('\x1b]1337;CurrentDir=/opt\x07'), ['/opt']);
+        assert.deepStrictEqual(scanner.push('\x1b]1337;CurrentDir=/opt\x07').directories, ['/opt']);
     });
 
     test('reports nothing for output that carries no sequence', () => {
         const scanner = new CwdScanner();
 
-        assert.deepStrictEqual(scanner.push('just some text\r\n'), []);
+        assert.deepStrictEqual(scanner.push('just some text\r\n').directories, []);
     });
 
     test('is not confused by other escape sequences', () => {
         const scanner = new CwdScanner();
         const coloured = '\x1b[32mgreen\x1b[0m';
 
-        assert.deepStrictEqual(scanner.push(`${coloured}${osc7('/tmp')}`), ['/tmp']);
+        assert.deepStrictEqual(scanner.push(`${coloured}${osc7('/tmp')}`).directories, ['/tmp']);
     });
 
     test('does not grow without bound on output that never terminates a sequence', () => {
@@ -88,7 +100,7 @@ suite('terminalCwd: scanning a stream', () => {
         scanner.push(`\x1b]${'x'.repeat(8000)}`);
 
         // The next real report still arrives, so nothing is stuck.
-        assert.deepStrictEqual(scanner.push(osc7('/after')), ['/after']);
+        assert.deepStrictEqual(scanner.push(osc7('/after')).directories, ['/after']);
     });
 });
 
@@ -121,23 +133,156 @@ suite('terminalCwd: asking the shell to report', () => {
         assert.strictEqual(result.stdout.trim(), '');
     });
 
-    test('actually reports a directory when the shell is bash', () => {
+    test('actually reports a directory when the shell is bash', function () {
+        if (!canAskShell) {
+            this.skip();
+        }
+
         const result = spawnSync('bash', ['-c', `${CWD_REPORT_SETUP}; eval "$PROMPT_COMMAND"`], {
             encoding: 'utf-8',
-            cwd: '/tmp',
+            cwd: TEMP,
         });
 
         assert.strictEqual(result.status, 0, result.stderr);
         assert.ok(result.stdout.includes(']7;file://'), result.stdout);
-        assert.ok(result.stdout.includes('/tmp'), result.stdout);
+        assert.ok(result.stdout.includes(TEMP), result.stdout);
     });
 
-    test('what bash emits is what the scanner reads', () => {
+    test('what bash emits is what the scanner reads', function () {
+        if (!canAskShell) {
+            this.skip();
+        }
+
         const result = spawnSync('bash', ['-c', `${CWD_REPORT_SETUP}; eval "$PROMPT_COMMAND"`], {
             encoding: 'utf-8',
-            cwd: '/tmp',
+            cwd: TEMP,
         });
 
-        assert.deepStrictEqual(new CwdScanner().push(result.stdout), ['/tmp']);
+        assert.deepStrictEqual(new CwdScanner().push(result.stdout).directories, [TEMP]);
+    });
+});
+
+suite('terminalCwd: keeping the reports out of the terminal', () => {
+    test('removes the sequence from what the terminal is shown', () => {
+        const scanner = new CwdScanner();
+        const { text } = scanner.push(`total 8\r\n${osc7('/var/log')}user@host:~$ `);
+
+        // VS Code reads these as the terminal's own directory and starts the
+        // next split terminal there, locally, where a remote path cannot exist.
+        assert.strictEqual(text, 'total 8\r\nuser@host:~$ ');
+        assert.ok(!text.includes('\x1b]7;'));
+    });
+
+    test('removes several without disturbing what is between them', () => {
+        const scanner = new CwdScanner();
+
+        assert.strictEqual(scanner.push(`${osc7('/a')}middle${osc7('/b')}end`).text, 'middleend');
+    });
+
+    test('leaves ordinary output alone, escape sequences included', () => {
+        const scanner = new CwdScanner();
+        const coloured = '\x1b[32mgreen\x1b[0m';
+
+        assert.strictEqual(scanner.push(coloured).text, coloured);
+    });
+
+    test('shows no half a sequence, holding it until it completes', () => {
+        const scanner = new CwdScanner();
+        const full = osc7('/home/me');
+        const cut = Math.floor(full.length / 2);
+
+        assert.strictEqual(scanner.push(`before${full.slice(0, cut)}`).text, 'before');
+        assert.strictEqual(scanner.push(`${full.slice(cut)}after`).text, 'after');
+    });
+
+    test('gives the held-back text back when it turns out not to be one', () => {
+        const scanner = new CwdScanner();
+
+        assert.strictEqual(scanner.push('text\x1b]').text, 'text');
+        assert.strictEqual(scanner.push('0;a title\x07more').text, '\x1b]0;a title\x07more');
+    });
+});
+
+suite('terminalCwd: not swallowing other escape sequences', () => {
+    test('lets a window title through, split or not', () => {
+        const scanner = new CwdScanner();
+
+        // Every shell sends one of these before each prompt. Held back waiting
+        // to see if it were a directory report, it would never be shown.
+        assert.strictEqual(scanner.push('\x1b]0;user@host: ~\x07$ ').text, '\x1b]0;user@host: ~\x07$ ');
+    });
+
+    test('releases an escape that turns out not to be ours', () => {
+        const scanner = new CwdScanner();
+
+        assert.strictEqual(scanner.push('before\x1b]').text, 'before');
+        assert.strictEqual(scanner.push('0;a title\x07after').text, '\x1b]0;a title\x07after');
+    });
+
+    test('still holds one of ours that has only just begun', () => {
+        const scanner = new CwdScanner();
+
+        assert.strictEqual(scanner.push('before\x1b]7').text, 'before');
+        assert.strictEqual(scanner.push(';file://host/tmp\x07after').text, 'after');
+    });
+});
+
+suite('terminalCwd: hiding the setup line', () => {
+    const setup = 'if [ -n "$BASH_VERSION" ]; then eval \'x\'; fi';
+
+    test('removes the echoed line, and the newline that ended it', () => {
+        const suppressor = new EchoSuppressor(setup);
+
+        assert.strictEqual(suppressor.push(`${setup}\r\nuser@host:~$ `), 'user@host:~$ ');
+    });
+
+    test('leaves what came before it, such as the banner', () => {
+        const suppressor = new EchoSuppressor(setup);
+
+        assert.strictEqual(suppressor.push(`Welcome to Ubuntu\r\n${setup}\n$ `), 'Welcome to Ubuntu\r\n$ ');
+    });
+
+    test('removes it even when split across reads', () => {
+        const suppressor = new EchoSuppressor(setup);
+        const cut = Math.floor(setup.length / 2);
+
+        assert.strictEqual(suppressor.push(setup.slice(0, cut)), '');
+        assert.strictEqual(suppressor.push(`${setup.slice(cut)}\r\n$ `), '$ ');
+    });
+
+    test('removes it once, leaving a later copy alone', () => {
+        const suppressor = new EchoSuppressor(setup);
+        suppressor.push(`${setup}\r\n`);
+
+        // Typed again by the user, and theirs to see.
+        assert.strictEqual(suppressor.push(`${setup}\r\n`), `${setup}\r\n`);
+    });
+
+    test('passes everything through when the line never appears', () => {
+        const suppressor = new EchoSuppressor(setup, 32);
+
+        assert.strictEqual(suppressor.push('some output'), 'some output');
+        assert.strictEqual(suppressor.push('more output that passes the budget'), 'more output that passes the budget');
+    });
+
+    test('holds nothing back once it has given up', () => {
+        const suppressor = new EchoSuppressor(setup, 8);
+        suppressor.push('x'.repeat(20));
+
+        assert.strictEqual(suppressor.push(setup.slice(0, 10)), setup.slice(0, 10));
+    });
+
+    test('does nothing at all when no line was sent', () => {
+        const suppressor = new EchoSuppressor('');
+
+        assert.strictEqual(suppressor.push('untouched'), 'untouched');
+    });
+
+    test('what the real setup line produces is what it removes', () => {
+        const suppressor = new EchoSuppressor(CWD_REPORT_SETUP);
+        const shown = suppressor.push(`${CWD_REPORT_SETUP}\r\nuser@host:~$ `);
+
+        assert.strictEqual(shown, 'user@host:~$ ');
+        assert.ok(!shown.includes('BASH_VERSION'));
     });
 });

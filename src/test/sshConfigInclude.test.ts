@@ -1,19 +1,33 @@
 import * as assert from 'assert';
+import * as path from 'path';
 import { expandHome, resolveConfigPath } from '../utils/paths';
 import { ConfigReader, flattenConfig, hostOrigins, expandGlob, splitPatterns } from '../utils/sshConfigInclude';
 
-const HOME = '/home/me';
-const SSH = '/home/me/.ssh';
+// ssh_config lives on this machine, so these are local paths: C:\home\me on
+// Windows, /home/me elsewhere. Building them the way the code does keeps the
+// fake filesystem's keys and the paths it is asked for in the same spelling.
+const ROOT = path.parse(process.cwd()).root;
+const HOME = path.join(ROOT, 'home', 'me');
+const SSH = path.join(HOME, '.ssh');
 
-/** A filesystem built from a map of paths to content. */
+/**
+ * A filesystem built from a map of paths to content.
+ *
+ * Both separators are accepted, as the real one on Windows does: a path built
+ * by `path.join` arrives with backslashes, and one built while expanding a
+ * glob with forward slashes, and they mean the same file.
+ */
 function reader(files: Record<string, string>): ConfigReader {
+    const slash = (file: string) => file.replace(/\\/g, '/');
+    const byPath = new Map(Object.entries(files).map(([file, content]) => [slash(file), content]));
+
     return {
-        read: path => files[path],
+        read: file => byPath.get(slash(file)),
         list: directory => {
-            const prefix = `${directory}/`;
-            const entries = Object.keys(files)
-                .filter(path => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
-                .map(path => path.slice(prefix.length));
+            const prefix = `${slash(directory)}/`;
+            const entries = [...byPath.keys()]
+                .filter(file => file.startsWith(prefix) && !file.slice(prefix.length).includes('/'))
+                .map(file => file.slice(prefix.length));
             return entries.length > 0 ? entries : undefined;
         },
     };
@@ -23,7 +37,7 @@ const text = (lines: ReturnType<typeof flattenConfig>) => lines.map(line => line
 
 suite('paths: expanding ~', () => {
     test('expands a leading ~/', () => {
-        assert.strictEqual(expandHome('~/.ssh/id_ed25519', HOME), '/home/me/.ssh/id_ed25519');
+        assert.strictEqual(expandHome('~/.ssh/id_ed25519', HOME), path.join(HOME, '.ssh', 'id_ed25519'));
     });
 
     test('expands a bare ~', () => {
@@ -43,8 +57,8 @@ suite('paths: expanding ~', () => {
     });
 
     test('resolves a relative path against the config directory, as ssh does', () => {
-        assert.strictEqual(resolveConfigPath('config.d/work', SSH, HOME), '/home/me/.ssh/config.d/work');
-        assert.strictEqual(resolveConfigPath('~/keys/work', SSH, HOME), '/home/me/keys/work');
+        assert.strictEqual(resolveConfigPath('config.d/work', SSH, HOME), path.join(SSH, 'config.d', 'work'));
+        assert.strictEqual(resolveConfigPath('~/keys/work', SSH, HOME), path.join(HOME, 'keys', 'work'));
         assert.strictEqual(resolveConfigPath('/etc/ssh/work', SSH, HOME), '/etc/ssh/work');
     });
 });
@@ -52,10 +66,12 @@ suite('paths: expanding ~', () => {
 suite('sshConfigInclude: following Include', () => {
     test('pulls an included file in where the directive sits', () => {
         const lines = flattenConfig(
-            `${SSH}/config`,
+            path.join(SSH, 'config'),
             reader({
-                [`${SSH}/config`]: ['Host first', '  HostName 1.1.1.1', 'Include work', 'Host last'].join('\n'),
-                [`${SSH}/work`]: 'Host work\n  HostName 2.2.2.2',
+                [path.join(SSH, 'config')]: ['Host first', '  HostName 1.1.1.1', 'Include work', 'Host last'].join(
+                    '\n'
+                ),
+                [path.join(SSH, 'work')]: 'Host work\n  HostName 2.2.2.2',
             }),
             SSH,
             HOME
@@ -72,11 +88,11 @@ suite('sshConfigInclude: following Include', () => {
 
     test('expands a glob, in a stable order', () => {
         const lines = flattenConfig(
-            `${SSH}/config`,
+            path.join(SSH, 'config'),
             reader({
-                [`${SSH}/config`]: 'Include config.d/*',
-                [`${SSH}/config.d/b`]: 'Host b',
-                [`${SSH}/config.d/a`]: 'Host a',
+                [path.join(SSH, 'config')]: 'Include config.d/*',
+                [path.join(SSH, 'config.d', 'b')]: 'Host b',
+                [path.join(SSH, 'config.d', 'a')]: 'Host a',
             }),
             SSH,
             HOME
@@ -87,11 +103,11 @@ suite('sshConfigInclude: following Include', () => {
 
     test('follows an include inside an included file', () => {
         const lines = flattenConfig(
-            `${SSH}/config`,
+            path.join(SSH, 'config'),
             reader({
-                [`${SSH}/config`]: 'Include one',
-                [`${SSH}/one`]: 'Include two',
-                [`${SSH}/two`]: 'Host deep',
+                [path.join(SSH, 'config')]: 'Include one',
+                [path.join(SSH, 'one')]: 'Include two',
+                [path.join(SSH, 'two')]: 'Host deep',
             }),
             SSH,
             HOME
@@ -102,8 +118,8 @@ suite('sshConfigInclude: following Include', () => {
 
     test('a file including itself stops instead of hanging', () => {
         const lines = flattenConfig(
-            `${SSH}/config`,
-            reader({ [`${SSH}/config`]: 'Host a\nInclude config' }),
+            path.join(SSH, 'config'),
+            reader({ [path.join(SSH, 'config')]: 'Host a\nInclude config' }),
             SSH,
             HOME
         );
@@ -113,8 +129,8 @@ suite('sshConfigInclude: following Include', () => {
 
     test('a missing include is skipped rather than hiding every host', () => {
         const lines = flattenConfig(
-            `${SSH}/config`,
-            reader({ [`${SSH}/config`]: 'Include gone\nHost still-here' }),
+            path.join(SSH, 'config'),
+            reader({ [path.join(SSH, 'config')]: 'Include gone\nHost still-here' }),
             SSH,
             HOME
         );
@@ -128,8 +144,8 @@ suite('sshConfigInclude: following Include', () => {
 
     test('accepts the Key=Value form, as ssh does', () => {
         const lines = flattenConfig(
-            `${SSH}/config`,
-            reader({ [`${SSH}/config`]: 'Include=work', [`${SSH}/work`]: 'Host work' }),
+            path.join(SSH, 'config'),
+            reader({ [path.join(SSH, 'config')]: 'Include=work', [path.join(SSH, 'work')]: 'Host work' }),
             SSH,
             HOME
         );

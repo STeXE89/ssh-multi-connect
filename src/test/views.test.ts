@@ -192,3 +192,76 @@ suite('FileDetailsViewProvider', () => {
         assert.doesNotThrow(() => fake.post({ command: 'applyPermissions' }));
     });
 });
+
+suite('multi-command panel markup', () => {
+    const read = (name: string) =>
+        require('fs').readFileSync(require('path').join(__dirname, '../../resources/media/webviews', name), 'utf-8');
+
+    test('offers the split-terminal toggle', () => {
+        const html = read('multiCommandPanel.html');
+
+        assert.ok(html.includes('id="split"'));
+        assert.ok(html.includes('type="checkbox"'));
+    });
+
+    test('the toggle carries a title and a hint of its own, not a bare label', () => {
+        const html = read('multiCommandPanel.html');
+
+        assert.ok(html.includes('toggle-title'));
+        assert.ok(html.includes('id="split-hint"'));
+    });
+
+    test('the hint says something different for each state', () => {
+        const script = read('multiCommandPanel.js');
+        const hints = [...script.matchAll(/splitHint\.textContent[\s\S]{0,200}?;/g)].join('');
+
+        assert.ok(hints.includes('side by side'));
+        assert.ok(hints.includes("host's own terminal"));
+    });
+
+    test('the send button is the last thing in the panel', () => {
+        const html = read('multiCommandPanel.html');
+
+        // It commits everything above it, so it belongs after the options
+        // rather than in the middle of them.
+        assert.ok(html.indexOf('id="send"') > html.indexOf('id="split"'));
+    });
+
+    test('the script reads and reports the toggle', () => {
+        const script = read('multiCommandPanel.js');
+
+        // Reports a change to the extension, and accepts the current value
+        // back, so the panel never disagrees with the setting.
+        assert.ok(script.includes("type: 'splitTerminals'"));
+        assert.ok(script.includes('splitTerminals !== undefined'));
+    });
+
+    test('the send message says what it is, so the two cannot be confused', () => {
+        assert.ok(read('multiCommandPanel.js').includes("type: 'send'"));
+    });
+
+    test('the panel still declares a content security policy', () => {
+        assert.ok(read('multiCommandPanel.html').includes('Content-Security-Policy'));
+    });
+});
+
+suite('multi-command panel styling', () => {
+    const css = () =>
+        require('fs').readFileSync(
+            require('path').join(__dirname, '../../resources/media/webviews/multiCommandPanel.css'),
+            'utf-8'
+        );
+
+    test('does not stretch the checkbox to the full width', () => {
+        // A checkbox caught by the text-input rule fills the row and pushes
+        // its own label out of the box.
+        const rule = css().match(/select,[\s\S]*?\{[\s\S]*?width: 100%/);
+
+        assert.ok(rule, 'the width rule went missing');
+        assert.ok(rule[0].includes("input:not([type='checkbox'])"), 'checkboxes are caught by the width rule');
+    });
+
+    test('the toggle row lets its text wrap rather than overflow', () => {
+        assert.ok(/\.toggle-text\s*\{[^}]*min-width: 0/.test(css()));
+    });
+});

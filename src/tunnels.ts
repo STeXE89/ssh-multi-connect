@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as net from 'net';
 import { Client } from 'ssh2';
 import { TunnelConfig, TunnelState, conflictsWith, tunnelLabel } from './utils/tunnelModel';
+import { log } from './log';
 
 /**
  * Turns a listen failure into something the user can act on.
@@ -72,9 +73,9 @@ export function explainForwardFailure(message: string, config: TunnelConfig): st
     return message;
 }
 
-/** Prefixed so tunnel activity is easy to pick out of the extension host log. */
-function log(message: string): void {
-    console.log(`[ssh-multi-connect] tunnel: ${message}`);
+/** Prefixed so tunnel activity is easy to pick out of the log. */
+function logTunnel(message: string): void {
+    log.info(`Tunnel: ${message}`);
 }
 
 /** A configured tunnel plus its current runtime state. */
@@ -194,7 +195,7 @@ export class TunnelManager {
 
         // Tunnel lifecycle events are rare and are the first thing needed
         // when a forward misbehaves, so they are logged.
-        log(`starting ${entry.config.kind} ${tunnelLabel(entry.config)} on ${connectionId}`);
+        logTunnel(`starting ${entry.config.kind} ${tunnelLabel(entry.config)} on ${connectionId}`);
 
         try {
             const runtime =
@@ -204,10 +205,10 @@ export class TunnelManager {
 
             this.runtimes.set(this.key(connectionId, tunnelId), runtime);
             this.settle(connectionId, entry, 'active');
-            log(`listening: ${tunnelLabel(entry.config)}`);
+            logTunnel(`listening: ${tunnelLabel(entry.config)}`);
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            log(`failed to start ${tunnelLabel(entry.config)}: ${message}`);
+            logTunnel(`failed to start ${tunnelLabel(entry.config)}: ${message}`);
             this.settle(connectionId, entry, 'error', message);
         }
     }
@@ -276,12 +277,12 @@ export class TunnelManager {
         const runtime = this.runtimes.get(this.key(connectionId, entry.config.id));
         if (runtime && !runtime.loggedFirstConnection) {
             runtime.loggedFirstConnection = true;
-            log(`first connection through ${tunnelLabel(entry.config)}`);
+            logTunnel(`first connection through ${tunnelLabel(entry.config)}`);
         }
     }
 
     private noteFailure(connectionId: string, entry: TunnelEntry, message: string): void {
-        log(`forward failed on ${tunnelLabel(entry.config)}: ${message}`);
+        logTunnel(`forward failed on ${tunnelLabel(entry.config)}: ${message}`);
         entry.lastError = explainForwardFailure(message, entry.config);
 
         const runtime = this.runtimes.get(this.key(connectionId, entry.config.id));

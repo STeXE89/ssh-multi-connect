@@ -50,3 +50,27 @@ export function splitTerminalName(connection: Selectable): string {
 export function missingTerminals<T extends Selectable>(targets: T[], existing: Set<string>): T[] {
     return targets.filter(target => !existing.has(target.id));
 }
+
+/**
+ * Names an additional terminal for a host.
+ *
+ * VS Code is happy to show two terminals with the same name, which leaves the
+ * user to tell them apart by guessing, so the second and later ones are
+ * numbered.
+ *
+ * @param base The name a host's first terminal carries.
+ * @param existing The names of the terminals already open.
+ * @returns A name not already in use.
+ */
+export function nextTerminalName(base: string, existing: readonly string[]): string {
+    if (!existing.includes(base)) {
+        return base;
+    }
+
+    for (let index = 2; ; index++) {
+        const candidate = `${base} (${index})`;
+        if (!existing.includes(candidate)) {
+            return candidate;
+        }
+    }
+}

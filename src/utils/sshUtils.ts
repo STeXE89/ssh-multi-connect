@@ -6,9 +6,10 @@ import * as vscode from 'vscode';
 import { readFile, writeFile, fileExists, ensureDirectoryExists, ensureFileExists, appendToFile } from './fileUtils';
 import { SSH_DEFAULT_PORT, SSHConnection, parseSshConfig, upsertConnection, removeHost } from './sshConfig';
 import { isValidHostname } from './shell';
-import { knownHostsLine } from './hostKeys';
+import { knownHostsLine, hostKeyStatus } from './hostKeys';
 import { ConfigReader, flattenConfig, hostOrigins } from './sshConfigInclude';
 import { expandHome } from './paths';
+import { log } from '../log';
 
 export const SSH_CONFIG_DIR = path.join(os.homedir(), '.ssh');
 export const SSH_CONFIG_PATH = path.join(SSH_CONFIG_DIR, 'config');
@@ -120,7 +121,7 @@ export const insertOrUpdateConnection = (connection: SSHConnection): void => {
         const updated = upsertConnection(readConfigFile(target), connection);
         writeFile(target, updated, 0o600);
     } catch (error) {
-        console.error('Error inserting or updating connection:', error);
+        log.error('Could not save the connection', error);
         vscode.window.showErrorMessage(`Failed to save connection for host "${connection.host}".`);
     }
 };
@@ -137,7 +138,7 @@ export const removeConnection = (host: string, sourceFile?: string): void => {
         writeFile(target, updated, 0o600);
         vscode.window.showInformationMessage(`Connection for host "${host}" has been removed.`);
     } catch (error) {
-        console.error('Error removing connection:', error);
+        log.error('Could not remove the connection', error);
         vscode.window.showErrorMessage(`Failed to remove connection for host "${host}".`);
     }
 };
@@ -167,7 +168,7 @@ export const getAllConnections = (): SSHConnection[] => {
                 : connection;
         });
     } catch (error) {
-        console.error('Error retrieving all connections:', error);
+        log.error('Could not read ssh_config', error);
         return [];
     }
 };
@@ -253,37 +254,42 @@ const keyscan = (hostname: string, port: number = SSH_DEFAULT_PORT): string => {
  * @param knownHostsLines The known_hosts formatted key lines.
  * @returns The first SHA256 fingerprint found, or null.
  */
-const fingerprintOf = (knownHostsLines: string): string | null => {
+const fingerprintsOf = (knownHostsLines: string): string[] => {
     if (!knownHostsLines) {
-        return null;
+        return [];
     }
+
     const output = execFileSync('ssh-keygen', ['-lf', '-'], {
         input: knownHostsLines,
         stdio: ['pipe', 'pipe', 'pipe'],
     }).toString();
-    return output.match(/SHA256:[^\s]+/)?.[0] ?? null;
+
+    // Every key, not the first: a host publishes several, and which one comes
+    // back first is a matter of network timing rather than of identity.
+    return [...output.matchAll(/SHA256:[^\s]+/g)].map(match => match[0]);
 };
 
 /**
  * Adds or updates the fingerprint of a host in the known_hosts file.
  * If the host's fingerprint has changed, it replaces the existing entry.
  * @param hostname The hostname or IP address of the server.
- * @param fingerprint The expected fingerprint of the server's public key.
+ * @param fingerprints The fingerprints the host is publishing now.
  * @param port The port the server listens on.
  */
-export const addKnownHost = (hostname: string, fingerprint: string, port: number = SSH_DEFAULT_PORT): void => {
+export const addKnownHost = (hostname: string, fingerprints: string[], port: number = SSH_DEFAULT_PORT): void => {
     try {
         ensureFileExists(SSH_KNOWN_HOSTS_PATH, 0o600);
 
-        const { exists, key: existingFingerprint } = isKnownHost(hostname);
+        const { keys } = isKnownHost(hostname);
+        const status = hostKeyStatus(keys, fingerprints);
 
-        if (exists) {
-            if (existingFingerprint && existingFingerprint !== fingerprint) {
-                console.log(`Host "${hostname}" fingerprint has changed. Updating known_hosts.`);
-                removeKnownHost(hostname);
-            } else {
-                return;
-            }
+        if (status === 'matches') {
+            return;
+        }
+
+        if (status === 'changed') {
+            log.warn(`Host "${hostname}" changed its key; updating known_hosts.`);
+            removeKnownHost(hostname);
         }
 
         const publicKeys = keyscan(hostname, port);
@@ -293,7 +299,7 @@ export const addKnownHost = (hostname: string, fingerprint: string, port: number
 
         // fs rather than a shell redirect: the key text comes from the server.
         appendToFile(SSH_KNOWN_HOSTS_PATH, `${publicKeys}\n`);
-        console.log(`Host "${hostname}" added to known_hosts.`);
+        log.info(`Host "${hostname}" added to known_hosts.`);
     } catch (error) {
         throw error instanceof Error ? error : new Error(String(error));
     }
@@ -310,26 +316,30 @@ export const removeKnownHost = (hostname: string): void => {
         }
 
         runCapture('ssh-keygen', ['-R', hostname, '-f', SSH_KNOWN_HOSTS_PATH]);
-        console.log(`Host "${hostname}" removed from known_hosts.`);
+        log.info(`Host "${hostname}" removed from known_hosts.`);
     } catch (error) {
-        console.error(`Error removing known host "${hostname}":`, error);
+        log.error(`Could not remove known host "${hostname}"`, error);
     }
 };
 
 /**
- * Checks if a hostname's fingerprint exists in the known_hosts file.
+ * Reads what known_hosts has recorded for a host.
+ *
+ * Every fingerprint, since a host normally publishes one per key type and any
+ * of them identifies it.
+ *
  * @param hostname The hostname or IP address to check.
- * @returns An object containing `exists` (boolean) and `key` (string or null).
+ * @returns Whether anything is recorded, and the fingerprints if so.
  */
-export const isKnownHost = (hostname: string): { exists: boolean; key: string | null } => {
+export const isKnownHost = (hostname: string): { exists: boolean; keys: string[] } => {
     try {
         if (!fileExists(SSH_KNOWN_HOSTS_PATH)) {
-            return { exists: false, key: null };
+            return { exists: false, keys: [] };
         }
 
         const found = runCapture('ssh-keygen', ['-F', hostname, '-f', SSH_KNOWN_HOSTS_PATH]);
         if (!found) {
-            return { exists: false, key: null };
+            return { exists: false, keys: [] };
         }
 
         // `ssh-keygen -F` prefixes a `# Host ... found` comment line.
@@ -338,10 +348,10 @@ export const isKnownHost = (hostname: string): { exists: boolean; key: string | 
             .filter(line => line.trim() && !line.trim().startsWith('#'))
             .join('\n');
 
-        return { exists: true, key: fingerprintOf(keyLines) };
+        return { exists: true, keys: fingerprintsOf(keyLines) };
     } catch {
         // ssh-keygen exits non-zero when the host is absent.
-        return { exists: false, key: null };
+        return { exists: false, keys: [] };
     }
 };
 
@@ -349,22 +359,22 @@ export const isKnownHost = (hostname: string): { exists: boolean; key: string | 
  * Retrieves the fingerprint of a host's public key using ssh-keyscan and ssh-keygen.
  * @param hostname The hostname or IP address of the server.
  * @param port The port the server listens on.
- * @returns The SHA256 fingerprint of the host's public key.
+ * @returns Every SHA256 fingerprint the host publishes.
  * @throws An error if the ssh-keyscan or ssh-keygen command fails.
  */
-export const getHostKeyFromKeyscan = (hostname: string, port: number = SSH_DEFAULT_PORT): string => {
+export const getHostKeyFromKeyscan = (hostname: string, port: number = SSH_DEFAULT_PORT): string[] => {
     try {
         const publicKeys = keyscan(hostname, port);
         if (!publicKeys) {
             throw new Error(`No key found for host "${hostname}" using ssh-keyscan.`);
         }
 
-        const fingerprint = fingerprintOf(publicKeys);
-        if (!fingerprint) {
+        const fingerprints = fingerprintsOf(publicKeys);
+        if (fingerprints.length === 0) {
             throw new Error(`Failed to extract fingerprint for host "${hostname}".`);
         }
 
-        return fingerprint;
+        return fingerprints;
     } catch {
         throw new Error(`Failed to retrieve host fingerprint for "${hostname}".`);
     }
