@@ -1,6 +1,18 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
 import { spawnSync } from 'child_process';
 import { CwdScanner, directoryFromOsc7, CWD_REPORT_SETUP, EchoSuppressor } from '../utils/terminalCwd';
+
+// The shell reports the directory it is actually in, and on macOS /tmp is a
+// symlink to /private/tmp -- so the name to expect is the resolved one.
+const TEMP = fs.realpathSync(os.tmpdir());
+
+// These read a real bash. The setup line is only ever sent to a remote shell,
+// and a bash on Windows answers in MSYS paths -- /c/Users/... for a directory
+// it was handed as C:\Users\... -- which is not what any remote would say, so
+// there is nothing to learn from asking it.
+const canAskShell = process.platform !== 'win32' && spawnSync('bash', ['-c', 'exit 0']).status === 0;
 
 const osc7 = (path: string) => `\x1b]7;file://host${path}\x07`;
 
@@ -121,24 +133,32 @@ suite('terminalCwd: asking the shell to report', () => {
         assert.strictEqual(result.stdout.trim(), '');
     });
 
-    test('actually reports a directory when the shell is bash', () => {
+    test('actually reports a directory when the shell is bash', function () {
+        if (!canAskShell) {
+            this.skip();
+        }
+
         const result = spawnSync('bash', ['-c', `${CWD_REPORT_SETUP}; eval "$PROMPT_COMMAND"`], {
             encoding: 'utf-8',
-            cwd: '/tmp',
+            cwd: TEMP,
         });
 
         assert.strictEqual(result.status, 0, result.stderr);
         assert.ok(result.stdout.includes(']7;file://'), result.stdout);
-        assert.ok(result.stdout.includes('/tmp'), result.stdout);
+        assert.ok(result.stdout.includes(TEMP), result.stdout);
     });
 
-    test('what bash emits is what the scanner reads', () => {
+    test('what bash emits is what the scanner reads', function () {
+        if (!canAskShell) {
+            this.skip();
+        }
+
         const result = spawnSync('bash', ['-c', `${CWD_REPORT_SETUP}; eval "$PROMPT_COMMAND"`], {
             encoding: 'utf-8',
-            cwd: '/tmp',
+            cwd: TEMP,
         });
 
-        assert.deepStrictEqual(new CwdScanner().push(result.stdout).directories, ['/tmp']);
+        assert.deepStrictEqual(new CwdScanner().push(result.stdout).directories, [TEMP]);
     });
 });
 

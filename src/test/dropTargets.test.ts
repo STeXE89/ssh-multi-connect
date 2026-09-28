@@ -4,31 +4,38 @@ import { localPathsFromUriList, dropDestination, uploadPath, posixParent, descri
 
 const parse = (value: string) => vscode.Uri.parse(value, true);
 
+// These are paths on this machine, not on the host, so they carry the local
+// separator: a dragged file is read from disk before it is ever uploaded.
+// Windows answers \home\me\a.txt where Linux answers /home/me/a.txt.
+const local = (posix: string) => vscode.Uri.file(posix).fsPath;
+
 suite('dropTargets: reading a uri-list', () => {
     test('reads the files VS Code hands over', () => {
         const list = ['file:///home/me/a.txt', 'file:///home/me/b.txt'].join('\r\n');
 
-        assert.deepStrictEqual(localPathsFromUriList(list, parse), ['/home/me/a.txt', '/home/me/b.txt']);
+        assert.deepStrictEqual(localPathsFromUriList(list, parse), [local('/home/me/a.txt'), local('/home/me/b.txt')]);
     });
 
     test('ignores comments and blank lines, which the format allows', () => {
         const list = ['# a comment', '', 'file:///home/me/a.txt', '  '].join('\r\n');
 
-        assert.deepStrictEqual(localPathsFromUriList(list, parse), ['/home/me/a.txt']);
+        assert.deepStrictEqual(localPathsFromUriList(list, parse), [local('/home/me/a.txt')]);
     });
 
     test('drops anything that is not a local file', () => {
         const list = ['https://example.com/a.txt', 'untitled:Untitled-1', 'file:///home/me/a.txt'].join('\n');
 
-        assert.deepStrictEqual(localPathsFromUriList(list, parse), ['/home/me/a.txt']);
+        assert.deepStrictEqual(localPathsFromUriList(list, parse), [local('/home/me/a.txt')]);
     });
 
     test('survives a line that is not a URI at all', () => {
-        assert.deepStrictEqual(localPathsFromUriList('not a uri\nfile:///a', parse), ['/a']);
+        assert.deepStrictEqual(localPathsFromUriList('not a uri\nfile:///a', parse), [local('/a')]);
     });
 
     test('decodes an escaped name rather than uploading the escapes', () => {
-        assert.deepStrictEqual(localPathsFromUriList('file:///home/me/my%20file.txt', parse), ['/home/me/my file.txt']);
+        assert.deepStrictEqual(localPathsFromUriList('file:///home/me/my%20file.txt', parse), [
+            local('/home/me/my file.txt'),
+        ]);
     });
 });
 
