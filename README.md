@@ -201,6 +201,32 @@ once -- they will not chase each other.
 
 Below some last release note, for more details see the CHANGELOG.md
 
+## [1.0.0] - 2026/09/28
+
+### Added
+
+- **Search on Host...** runs `grep` on the host and opens a match at its line.
+- Following works with whichever of a host's shells you are looking at, not only its first.
+- **Host Key...** shows the fingerprint recorded for a host, and removes it when the host has been rebuilt.
+- The multi-command panel suggests the commands you have sent before.
+- **New Terminal** on a connected host opens another shell, split alongside the ones it already has.
+- A log in **Output → SSH Multi Connect**, and **Show Log** to open it.
+- A checkbox in the multi-command panel for the split terminal group, so it can be turned off without opening settings.
+- A word of explanation the first time VS Code's split button opens a local shell beside a remote one.
+
+### Fixed
+
+- A host whose `ssh_config` names its own `IdentityFile` authenticated with a different key: the path was replaced with this extension's own `~/.ssh/<host>_key` convention.
+- Every connection to a host asked whether to update its key. A host publishes several, and only the first of each side's was compared, so any difference in order looked like a change.
+- Splitting a terminal with VS Code's own button failed with "Starting directory does not exist": the directory reports reached VS Code, which took the remote path for the terminal's own.
+- A window title, which every shell sends before each prompt, could be held back and never shown.
+- The line that sets up directory reporting was shown in the terminal.
+- Following the terminal moved the tree's root to that folder, hiding everything above it; it is revealed instead.
+- The split-terminal checkbox was stretched across the panel, pushing its own label out of view.
+- Selecting a folder showed no details when `du` could not read part of it, though it had reported a usable total.
+- A `Match` block was read as part of the host above it, so that host showed settings that were not its own — and rewriting it, which happens on any edit, deleted the `Match` block from `ssh_config` entirely.
+- A test could fail for the machine's sake rather than its own.
+
 ## [0.0.10] - 2026/09/16
 
 ### Added

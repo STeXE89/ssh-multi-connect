@@ -2,7 +2,7 @@
 
 All notable changes to the "ssh-multi-connect" extension will be documented in this file.
 
-## [Unreleased]
+## [1.0.0] - 2026/09/28
 
 ### Added
 
