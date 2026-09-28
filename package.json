@@ -263,7 +263,7 @@
         "sshMultiConnect.followTerminalDirectory": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Move **Remote Files** to the folder the connection's terminal is in \u2014 the other direction of `#sshMultiConnect.followPathInTerminal#`. Both can be on at once; they will not chase each other.\n\n**When it is on:** every terminal opened from then on runs one setup line as it starts, which makes the shell report its folder before each prompt. The line itself is hidden from the terminal, though it stays in the shell's history, and the shell carries an extra function on `PROMPT_COMMAND` (bash) or in `precmd_functions` (zsh) until it exits. Terminals already open are not touched; reopen one to have it report.\n\n**What you get:** the tree follows any change the shell reports, including one made by a script, by `pushd`, or by a `cd` inside a command you ran, not only a `cd` you typed yourself.\n\n**Shells:** only bash and zsh can report. On dash, ash, fish, csh and anything else the setup line does nothing at all, silently, and the tree simply will not follow.\n\n**What it does to the tree:** the folder is revealed and selected in **Remote Files**, which keeps everything above it in view rather than moving the tree's root."
+          "markdownDescription": "Move **Remote Files** to the folder the connection's terminal is in — the other direction of `#sshMultiConnect.followPathInTerminal#`. Both can be on at once; they will not chase each other.\n\n**When it is on:** every terminal opened from then on runs one setup line as it starts, which makes the shell report its folder before each prompt. The line itself is hidden from the terminal, though it stays in the shell's history, and the shell carries an extra function on `PROMPT_COMMAND` (bash) or in `precmd_functions` (zsh) until it exits. Terminals already open are not touched; reopen one to have it report.\n\n**What you get:** the tree follows any change the shell reports, including one made by a script, by `pushd`, or by a `cd` inside a command you ran, not only a `cd` you typed yourself.\n\n**Shells:** only bash and zsh can report. On dash, ash, fish, csh and anything else the setup line does nothing at all, silently, and the tree simply will not follow.\n\n**What it does to the tree:** the folder is revealed and selected in **Remote Files**, which keeps everything above it in view rather than moving the tree's root."
         },
         "sshMultiConnect.suggestVersionChannel": {
           "type": "boolean",
@@ -599,8 +599,8 @@
     "@types/vscode": "~1.96.0",
     "@typescript-eslint/eslint-plugin": "^8.34.0",
     "@typescript-eslint/parser": "^8.34.0",
-    "@vscode/test-cli": "^0.0.10",
-    "@vscode/test-electron": "^2.5.2",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "3.9.2",
     "eslint": "^9.28.0",
     "prettier": "^3.9.6",
