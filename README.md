@@ -10,6 +10,9 @@ This extension 'ssh-multi-connect' allows you to group SSH connections into fold
 - Open remote files in the editor and save changes back to the server.
 - Organize SSH connections into folders, with drag and drop.
 - Execute commands on multiple hosts simultaneously.
+- Open more than one shell on a host with **New Terminal**, grouped together in one
+  split terminal. VS Code's own split button cannot do this: it has no way to copy an
+  extension's terminal, so it opens a local shell instead.
 - Inspect and remove a recorded host key.
 - Recent multi-host commands are suggested rather than retyped.
 - Open local and remote SSH tunnels, with start/stop control and live state.
@@ -132,19 +135,23 @@ once -- they will not chase each other.
 
   Because it is typed, it goes wherever that terminal's input goes: if a program is
   running there -- an editor, `top`, `less` -- or a command is half typed, the `cd`
-  lands in that instead. It reaches the connection's own terminal, not the split group
-  the multi-command panel opens. Every shell understands `cd`, so this one works on
-  all of them.
+  lands in that instead. A host can have several shells: the `cd` goes to whichever
+  of them is in front of you, or to the connection's own when the active terminal
+  belongs to something else. The multi-command panel's group is left alone. Every
+  shell understands `cd`, so this one works on all of them.
 
 * `sshMultiConnect.followTerminalDirectory` (default `false`): **terminal to tree**.
   Every terminal opened from then on runs one setup line as it starts, which makes the
-  shell report its folder before each prompt; the tree then follows. You will see that
-  line in the terminal, and the shell carries an extra function on `PROMPT_COMMAND`
-  (bash) or in `precmd_functions` (zsh) until it exits. Terminals already open are not
-  touched -- reopen one to have it report.
+  shell report its folder before each prompt; the tree then reveals and selects that
+  folder, keeping everything above it in view rather than moving its root. The line
+  itself is hidden from the terminal, though it stays in the shell's history, and the
+  shell carries an extra function on `PROMPT_COMMAND` (bash) or in
+  `precmd_functions` (zsh) until it exits. Terminals already open are not touched --
+  reopen one to have it report.
 
   The tree follows any change the shell reports, including one made by a script, by
-  `pushd`, or by a `cd` inside a command you ran. **Only bash and zsh can report**:
+  `pushd`, or by a `cd` inside a command you ran -- from whichever shell you are
+  looking at, when a host has more than one. **Only bash and zsh can report**:
   on dash, ash, fish, csh and anything else the setup line does nothing at all,
   silently, and the tree will not follow.
 

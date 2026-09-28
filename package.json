@@ -170,6 +170,12 @@
         "tooltip": "Show the recorded host key, and remove it if the host was rebuilt"
       },
       {
+        "command": "sshMultiConnect.newTerminal",
+        "icon": "$(terminal)",
+        "title": "New Terminal",
+        "tooltip": "Open another shell on this connection, beside the ones it has. VS Code's own split button opens a local shell instead."
+      },
+      {
         "command": "sshMultiConnect.addTunnel",
         "icon": "$(plug)",
         "title": "Add Tunnel...",
@@ -257,7 +263,7 @@
         "sshMultiConnect.followTerminalDirectory": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Move **Remote Files** to the folder the connection's terminal is in \u2014 the other direction of `#sshMultiConnect.followPathInTerminal#`. Both can be on at once; they will not chase each other.\n\n**When it is on:** every terminal opened from then on runs one setup line as it starts, which makes the shell report its folder before each prompt. You will see that line in the terminal, and the shell carries an extra function on `PROMPT_COMMAND` (bash) or in `precmd_functions` (zsh) until it exits. Terminals already open are not touched; reopen one to have it report.\n\n**What you get:** the tree follows any change the shell reports, including one made by a script, by `pushd`, or by a `cd` inside a command you ran, not only a `cd` you typed yourself.\n\n**Shells:** only bash and zsh can report. On dash, ash, fish, csh and anything else the setup line does nothing at all, silently, and the tree simply will not follow."
+          "markdownDescription": "Move **Remote Files** to the folder the connection's terminal is in \u2014 the other direction of `#sshMultiConnect.followPathInTerminal#`. Both can be on at once; they will not chase each other.\n\n**When it is on:** every terminal opened from then on runs one setup line as it starts, which makes the shell report its folder before each prompt. The line itself is hidden from the terminal, though it stays in the shell's history, and the shell carries an extra function on `PROMPT_COMMAND` (bash) or in `precmd_functions` (zsh) until it exits. Terminals already open are not touched; reopen one to have it report.\n\n**What you get:** the tree follows any change the shell reports, including one made by a script, by `pushd`, or by a `cd` inside a command you ran, not only a `cd` you typed yourself.\n\n**Shells:** only bash and zsh can report. On dash, ash, fish, csh and anything else the setup line does nothing at all, silently, and the tree simply will not follow.\n\n**What it does to the tree:** the folder is revealed and selected in **Remote Files**, which keeps everything above it in view rather than moving the tree's root."
         },
         "sshMultiConnect.suggestVersionChannel": {
           "type": "boolean",
@@ -308,12 +314,12 @@
         {
           "command": "sshMultiConnect.connect",
           "when": "viewItem == sshConnectionDisconnected",
-          "group": "inline"
+          "group": "inline@2"
         },
         {
           "command": "sshMultiConnect.disconnect",
           "when": "viewItem == sshConnectionConnected",
-          "group": "inline"
+          "group": "inline@2"
         },
         {
           "command": "sshMultiConnect.editConnection",
@@ -323,12 +329,12 @@
         {
           "command": "sshMultiConnect.removeConnection",
           "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
-          "group": "inline"
+          "group": "inline@4"
         },
         {
           "command": "sshMultiConnect.moveToFolder",
           "when": "viewItem == sshConnection || viewItem == sshConnectionConnected || viewItem == sshConnectionDisconnected",
-          "group": "inline"
+          "group": "inline@3"
         },
         {
           "command": "sshMultiConnect.forgetPassword",
@@ -405,9 +411,19 @@
           "group": "9_danger@1"
         },
         {
-          "command": "sshMultiConnect.addTunnel",
+          "command": "sshMultiConnect.newTerminal",
           "when": "viewItem == sshConnectionConnected",
           "group": "inline@0"
+        },
+        {
+          "command": "sshMultiConnect.addTunnel",
+          "when": "viewItem == sshConnectionConnected",
+          "group": "inline@1"
+        },
+        {
+          "command": "sshMultiConnect.newTerminal",
+          "when": "viewItem == sshConnectionConnected",
+          "group": "1_state@2"
         },
         {
           "command": "sshMultiConnect.manageHostKey",
@@ -524,6 +540,10 @@
         },
         {
           "command": "sshMultiConnect.addTunnel",
+          "when": "false"
+        },
+        {
+          "command": "sshMultiConnect.newTerminal",
           "when": "false"
         },
         {

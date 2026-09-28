@@ -134,3 +134,79 @@ export class CwdScanner {
         return couldBecomeOurs ? partial : '';
     }
 }
+
+/**
+ * Removes one known echo from a terminal stream.
+ *
+ * The shell echoes whatever is typed into it, so the line that sets up
+ * directory reporting appears in the terminal: a wall of shell syntax at the
+ * top of every session, which looks alarming and explains nothing. It is
+ * removed on its way to the terminal, once.
+ *
+ * Only an exact match is removed. If the stream does not contain the text --
+ * a shell that does not echo, or one that rewraps what it echoes -- the
+ * suppressor gives up and lets everything through, which is no worse than not
+ * having tried.
+ */
+export class EchoSuppressor {
+    private held = '';
+    private seen = 0;
+    private done = false;
+
+    /**
+     * @param text The line that was sent, and should not be shown.
+     * @param budget How much output to watch before giving up.
+     */
+    constructor(
+        private readonly text: string,
+        private readonly budget = 16384
+    ) {
+        this.done = text.length === 0;
+    }
+
+    /**
+     * Passes output through, minus the echo.
+     *
+     * @param chunk Output as it arrived.
+     * @returns What the terminal should show.
+     */
+    push(chunk: string): string {
+        if (this.done) {
+            return chunk;
+        }
+
+        this.seen += chunk.length;
+        const buffer = this.held + chunk;
+
+        const at = buffer.indexOf(this.text);
+        if (at !== -1) {
+            this.done = true;
+            this.held = '';
+
+            // The newline that ended the line goes too, so the terminal is not
+            // left with a blank line where the command was.
+            const after = at + this.text.length;
+            const rest = buffer.slice(after).replace(/^\r?\n/, '');
+            return buffer.slice(0, at) + rest;
+        }
+
+        if (this.seen > this.budget) {
+            this.done = true;
+            this.held = '';
+            return buffer;
+        }
+
+        // Whatever could still turn out to be the start of the echo is held
+        // back; everything before it is safe to show now.
+        const keep = Math.min(this.text.length - 1, buffer.length);
+        for (let length = keep; length > 0; length--) {
+            if (this.text.startsWith(buffer.slice(buffer.length - length))) {
+                this.held = buffer.slice(buffer.length - length);
+                return buffer.slice(0, buffer.length - length);
+            }
+        }
+
+        this.held = '';
+        return buffer;
+    }
+}

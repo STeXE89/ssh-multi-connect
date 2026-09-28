@@ -7,10 +7,13 @@ All notable changes to the "ssh-multi-connect" extension will be documented in t
 ### Added
 
 - **Search on Host...** runs `grep` on the host and opens a match at its line.
+- Following works with whichever of a host's shells you are looking at, not only its first.
 - **Host Key...** shows the fingerprint recorded for a host, and removes it when the host has been rebuilt.
 - The multi-command panel suggests the commands you have sent before.
+- **New Terminal** on a connected host opens another shell, split alongside the ones it already has.
 - A log in **Output → SSH Multi Connect**, and **Show Log** to open it.
 - A checkbox in the multi-command panel for the split terminal group, so it can be turned off without opening settings.
+- A word of explanation the first time VS Code's split button opens a local shell beside a remote one.
 
 ### Fixed
 

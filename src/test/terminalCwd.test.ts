@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { spawnSync } from 'child_process';
-import { CwdScanner, directoryFromOsc7, CWD_REPORT_SETUP } from '../utils/terminalCwd';
+import { CwdScanner, directoryFromOsc7, CWD_REPORT_SETUP, EchoSuppressor } from '../utils/terminalCwd';
 
 const osc7 = (path: string) => `\x1b]7;file://host${path}\x07`;
 
@@ -204,5 +204,65 @@ suite('terminalCwd: not swallowing other escape sequences', () => {
 
         assert.strictEqual(scanner.push('before\x1b]7').text, 'before');
         assert.strictEqual(scanner.push(';file://host/tmp\x07after').text, 'after');
+    });
+});
+
+suite('terminalCwd: hiding the setup line', () => {
+    const setup = 'if [ -n "$BASH_VERSION" ]; then eval \'x\'; fi';
+
+    test('removes the echoed line, and the newline that ended it', () => {
+        const suppressor = new EchoSuppressor(setup);
+
+        assert.strictEqual(suppressor.push(`${setup}\r\nuser@host:~$ `), 'user@host:~$ ');
+    });
+
+    test('leaves what came before it, such as the banner', () => {
+        const suppressor = new EchoSuppressor(setup);
+
+        assert.strictEqual(suppressor.push(`Welcome to Ubuntu\r\n${setup}\n$ `), 'Welcome to Ubuntu\r\n$ ');
+    });
+
+    test('removes it even when split across reads', () => {
+        const suppressor = new EchoSuppressor(setup);
+        const cut = Math.floor(setup.length / 2);
+
+        assert.strictEqual(suppressor.push(setup.slice(0, cut)), '');
+        assert.strictEqual(suppressor.push(`${setup.slice(cut)}\r\n$ `), '$ ');
+    });
+
+    test('removes it once, leaving a later copy alone', () => {
+        const suppressor = new EchoSuppressor(setup);
+        suppressor.push(`${setup}\r\n`);
+
+        // Typed again by the user, and theirs to see.
+        assert.strictEqual(suppressor.push(`${setup}\r\n`), `${setup}\r\n`);
+    });
+
+    test('passes everything through when the line never appears', () => {
+        const suppressor = new EchoSuppressor(setup, 32);
+
+        assert.strictEqual(suppressor.push('some output'), 'some output');
+        assert.strictEqual(suppressor.push('more output that passes the budget'), 'more output that passes the budget');
+    });
+
+    test('holds nothing back once it has given up', () => {
+        const suppressor = new EchoSuppressor(setup, 8);
+        suppressor.push('x'.repeat(20));
+
+        assert.strictEqual(suppressor.push(setup.slice(0, 10)), setup.slice(0, 10));
+    });
+
+    test('does nothing at all when no line was sent', () => {
+        const suppressor = new EchoSuppressor('');
+
+        assert.strictEqual(suppressor.push('untouched'), 'untouched');
+    });
+
+    test('what the real setup line produces is what it removes', () => {
+        const suppressor = new EchoSuppressor(CWD_REPORT_SETUP);
+        const shown = suppressor.push(`${CWD_REPORT_SETUP}\r\nuser@host:~$ `);
+
+        assert.strictEqual(shown, 'user@host:~$ ');
+        assert.ok(!shown.includes('BASH_VERSION'));
     });
 });

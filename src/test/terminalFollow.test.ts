@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { directoryFor, TerminalPathFollower } from '../terminalFollow';
+import { directoryFor, TerminalPathFollower, chooseShell } from '../terminalFollow';
 
 /** Collects what would have been typed into the terminal. */
 function recorder() {
@@ -114,5 +114,43 @@ suite('terminalFollow: TerminalPathFollower', () => {
         follower.follow('web', '/var/log', true, send);
 
         assert.strictEqual(sent.length, 2);
+    });
+});
+
+suite('terminalFollow: choosing which shell follows', () => {
+    const own = "the connection's own terminal";
+    const second = 'a second shell on the same host';
+
+    test('follows the shell in front of the user', () => {
+        const active = { terminal: second, connectionId: 'web' };
+
+        assert.strictEqual(chooseShell('web', active, own), second);
+    });
+
+    test("falls back to the connection's own when another host is active", () => {
+        const active = { terminal: 'a shell on a different host', connectionId: 'other' };
+
+        assert.strictEqual(chooseShell('web', active, own), own);
+    });
+
+    test('falls back when the active terminal is not a connection shell at all', () => {
+        // A plain local terminal, or an editor has the focus.
+        const active = { terminal: 'bash', connectionId: undefined };
+
+        assert.strictEqual(chooseShell('web', active, own), own);
+    });
+
+    test('falls back when nothing is active', () => {
+        assert.strictEqual(chooseShell('web', undefined, own), own);
+    });
+
+    test('has nothing to follow when the connection has no terminal', () => {
+        assert.strictEqual(chooseShell('web', undefined, undefined), undefined);
+    });
+
+    test("still prefers the active shell when it is the connection's own", () => {
+        const active = { terminal: own, connectionId: 'web' };
+
+        assert.strictEqual(chooseShell('web', active, own), own);
     });
 });

@@ -206,6 +206,44 @@ export class RemoteFileProvider implements vscode.TreeDataProvider<vscode.TreeIt
         return Promise.resolve([]);
     }
 
+    /**
+     * The folder an item sits in, so the tree can be revealed down to it.
+     *
+     * VS Code walks upwards from an item to find how to expand to it. Items
+     * are matched by id, which is the resource URI, so an item built here
+     * stands for the same node the tree already holds.
+     *
+     * @param element The item whose parent is wanted.
+     * @returns The parent item, or undefined at the root of this tree.
+     */
+    getParent(element: vscode.TreeItem): vscode.TreeItem | undefined {
+        if (!(element instanceof RemoteFileTreeItem)) {
+            return undefined;
+        }
+
+        const parent = path.posix.dirname(element.resourceUri.path);
+        if (parent === element.resourceUri.path || !parent.startsWith(this.currentPath)) {
+            return undefined;
+        }
+
+        return this.itemFor(parent);
+    }
+
+    /**
+     * Builds the item standing for a folder on this connection.
+     *
+     * @param remotePath The folder.
+     * @returns A collapsed directory item.
+     */
+    public itemFor(remotePath: string): RemoteFileTreeItem {
+        return new RemoteFileTreeItem(
+            this.createResourceUri(path.posix.dirname(remotePath), path.posix.basename(remotePath)),
+            vscode.TreeItemCollapsibleState.Collapsed,
+            this.connection,
+            true
+        );
+    }
+
     private async fetchRemoteFiles(remotePath: string): Promise<RemoteFileTreeItem[]> {
         try {
             if (!this.connection.client) {

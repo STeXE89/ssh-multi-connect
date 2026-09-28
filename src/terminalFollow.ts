@@ -73,3 +73,24 @@ export class TerminalPathFollower {
         this.lastDirectory.delete(connectionId);
     }
 }
+
+/**
+ * Picks the shell a connection's directory changes belong to.
+ *
+ * A host can have several shells open. The tree shows one directory, so
+ * following has to mean the shell in front of the user, falling back to the
+ * connection's own when the active terminal belongs to something else -- or to
+ * nothing, as when the focus is in an editor.
+ *
+ * @param connectionId The connection being followed.
+ * @param active The terminal in front of the user, and whose connection it is.
+ * @param own The connection's first terminal.
+ * @returns The terminal to send to, or undefined when there is none.
+ */
+export function chooseShell<T>(
+    connectionId: string,
+    active: { terminal: T; connectionId: string | undefined } | undefined,
+    own: T | undefined
+): T | undefined {
+    return active && active.connectionId === connectionId ? active.terminal : own;
+}

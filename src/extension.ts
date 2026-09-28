@@ -86,6 +86,7 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(remoteFilesView);
     sshViewProvider.setRemoteFilesView(remoteFilesView);
     sshViewProvider.setPathFollower(pathFollower);
+    context.subscriptions.push(...sshViewProvider.watchForLocalSplits());
 
     const decorationProvider = new SSHTreeDecorationProvider(
         (connectionId: string) =>
@@ -153,12 +154,25 @@ function followSelectionInTerminal(
         return;
     }
 
-    const terminal = sshViewProvider.getTerminal(item.connection.id);
+    // The shell in front of the user, which is not always the connection's
+    // first one now that a host can have several.
+    const terminal = sshViewProvider.shellToFollow(item.connection.id);
     if (!terminal) {
         return;
     }
 
-    follower.follow(item.connection.id, item.resourceUri.path, item.isDirectory, text => terminal.sendText(text));
+    const sent = follower.follow(item.connection.id, item.resourceUri.path, item.isDirectory, text =>
+        terminal.sendText(text)
+    );
+
+    if (sent) {
+        // Which of a host's shells received a cd is otherwise impossible to
+        // see from outside, so it is available by raising the log level.
+        log.debug(
+            `Followed ${item.resourceUri.path} into "${terminal.name}" ` +
+                `(active terminal: "${vscode.window.activeTerminal?.name ?? 'none'}").`
+        );
+    }
 }
 
 function createSSHTreeView(
@@ -264,6 +278,10 @@ function registerCommands(
         {
             command: 'sshMultiConnect.manageHostKey',
             callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.manageHostKey(treeItem),
+        },
+        {
+            command: 'sshMultiConnect.newTerminal',
+            callback: (treeItem: SSHConnectionTreeItem) => sshViewProvider.newTerminal(treeItem),
         },
         {
             command: 'sshMultiConnect.addTunnel',

@@ -69,6 +69,27 @@ export class RemoteFilesView implements vscode.TreeDataProvider<vscode.TreeItem>
         return this.delegate ? this.delegate.getChildren(element) : [];
     }
 
+    /** Needed for reveal: VS Code walks upwards to work out how to expand. */
+    getParent(element: vscode.TreeItem): vscode.ProviderResult<vscode.TreeItem> {
+        return this.delegate?.getParent?.(element);
+    }
+
+    /**
+     * Expands the tree down to an item and selects it.
+     *
+     * @param element The item to show.
+     * @returns Whether the tree could reach it.
+     */
+    async reveal(element: vscode.TreeItem): Promise<boolean> {
+        try {
+            await this.treeView.reveal(element, { expand: true, select: true, focus: false });
+            return true;
+        } catch {
+            // Outside the tree's root, or a folder that has since gone.
+            return false;
+        }
+    }
+
     dispose(): void {
         this.delegateSubscription?.dispose();
         this.treeView.dispose();

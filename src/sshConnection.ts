@@ -20,7 +20,7 @@ import {
 } from './utils/connectionEdit';
 import { accountLabel, hostPasswordPrompt } from './utils/authPrompts';
 import { RemoteViewAction, remoteViewAfterDisconnect } from './utils/viewState';
-import { missingTerminals, selectedTargets, splitTerminalName } from './utils/multiCommandTargets';
+import { missingTerminals, nextTerminalName, selectedTargets, splitTerminalName } from './utils/multiCommandTargets';
 import { readHistory, rememberCommand } from './utils/commandHistory';
 import {
     splitTerminalsForMultiCommand,
@@ -32,7 +32,8 @@ import { backoffDelays, canReconnectSilently, describeAttempt } from './utils/re
 import { SSHTreeDecorationProvider, connectionResourceUri, folderResourceUri } from './connectionDecorations';
 import { hostKeyStatus } from './utils/hostKeys';
 import { RemoteFilesView } from './remoteFilesView';
-import { TerminalPathFollower } from './terminalFollow';
+import { TerminalPathFollower, chooseShell } from './terminalFollow';
+import { isLocalSplitOfRemote } from './utils/localSplit';
 import { TunnelManager } from './tunnels';
 import { JumpChain, openJumpChain } from './proxyChain';
 import { jumpPlanFor, resolveHost, createAuthProvider, createKeyApprover } from './jumpSession';
@@ -243,6 +244,17 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
     public connections: ExtendedSSHConnection[] = [];
     private selectedConnection?: ExtendedSSHConnection;
     private terminals: Map<string, vscode.Terminal> = new Map();
+    /**
+     * Every shell open on a connection, its own and any extra ones.
+     *
+     * The tree can only show one directory, so following has to know which
+     * terminal the user is actually looking at rather than assuming the first.
+     */
+    private readonly shells = new Map<vscode.Terminal, string>();
+    /** The last of this extension's shells to be looked at. */
+    private lastActiveShell?: vscode.Terminal;
+    /** Set once the local-split explanation has been given. */
+    private explainedLocalSplit = false;
     public multiCommandPanel?: MultiCommandPanel;
     private detailsView?: FileDetailsViewProvider;
     private decorationProvider?: SSHTreeDecorationProvider;
@@ -421,6 +433,98 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
 
     public registerTerminal(connection: ExtendedSSHConnection, terminal: vscode.Terminal) {
         this.terminals.set(connection.id, terminal);
+        this.registerShell(connection.id, terminal);
+    }
+
+    /**
+     * Notes that a terminal is a shell on a connection.
+     *
+     * @param connectionId The connection it belongs to.
+     * @param terminal The terminal.
+     */
+    private registerShell(connectionId: string, terminal: vscode.Terminal): void {
+        this.shells.set(terminal, connectionId);
+    }
+
+    /**
+     * Watches for VS Code's split button being used on a remote terminal.
+     *
+     * It cannot reopen one -- there is no way to copy a pseudoterminal -- so
+     * it starts a local shell instead, in the same split group and with
+     * nothing about it to say so. Explained once, the first time it happens.
+     *
+     * @returns Subscriptions for the caller to dispose.
+     */
+    public watchForLocalSplits(): vscode.Disposable[] {
+        return [
+            vscode.window.onDidChangeActiveTerminal(terminal => {
+                if (terminal && this.shells.has(terminal)) {
+                    this.lastActiveShell = terminal;
+                }
+            }),
+
+            vscode.window.onDidOpenTerminal(terminal => {
+                const opened = {
+                    ours: this.shells.has(terminal),
+                    hasPty: 'pty' in (terminal.creationOptions ?? {}),
+                };
+                const cameFromOurs =
+                    this.lastActiveShell !== undefined && vscode.window.terminals.includes(this.lastActiveShell);
+
+                if (!isLocalSplitOfRemote(opened, cameFromOurs, this.explainedLocalSplit)) {
+                    return;
+                }
+
+                this.explainedLocalSplit = true;
+                log.info(`A local terminal "${terminal.name}" opened beside a remote one; explaining once.`);
+
+                const connectionId = this.lastActiveShell && this.shells.get(this.lastActiveShell);
+                const connection = this.connections.find(conn => conn.id === connectionId);
+
+                void vscode.window
+                    .showInformationMessage(
+                        "That is a local shell. VS Code's split button cannot reopen a remote terminal, so it " +
+                            'starts one here instead. The terminal button on the connection opens another shell ' +
+                            'on the host.',
+                        ...(connection ? ['Open a remote shell'] : [])
+                    )
+                    .then(answer => {
+                        if (answer && connection) {
+                            this.newTerminal(this.createConnectionItem(connection));
+                        }
+                    });
+            }),
+        ];
+    }
+
+    /**
+     * The terminal a directory change should be sent to.
+     *
+     * Whichever of the connection's shells is in front of the user, so
+     * following a folder moves the terminal being watched rather than the
+     * first one that happened to be opened.
+     *
+     * @param connectionId The connection.
+     * @returns The terminal, or undefined when the connection has none.
+     */
+    public shellToFollow(connectionId: string): vscode.Terminal | undefined {
+        const active = vscode.window.activeTerminal;
+
+        return chooseShell(
+            connectionId,
+            active ? { terminal: active, connectionId: this.shells.get(active) } : undefined,
+            this.terminals.get(connectionId)
+        );
+    }
+
+    /**
+     * Reports whether a terminal is the one the user is looking at.
+     *
+     * @param terminal The terminal that reported a directory.
+     * @returns True when it is active.
+     */
+    private isActiveShell(terminal: vscode.Terminal | undefined): boolean {
+        return terminal !== undefined && vscode.window.activeTerminal === terminal;
     }
 
     /**
@@ -985,12 +1089,23 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
                 treeItem.updateContextValue();
                 this._onDidChangeTreeData.fire(treeItem);
 
-                const pty = new SSHPseudoterminal(client, followTerminalDirectory());
-                pty.onDidChangeDirectory(directory => this.followTerminalIntoTree(connection, directory));
+                const pty = new SSHPseudoterminal(
+                    client,
+                    followTerminalDirectory(),
+                    `${connection.user}@${connection.host}`
+                );
 
                 const terminal = vscode.window.createTerminal({
                     name: `${connection.user}@${connection.host}`,
                     pty,
+                });
+
+                pty.onDidChangeDirectory(directory => {
+                    // Several shells can report at once; only the one being
+                    // looked at should move the tree.
+                    if (this.isActiveShell(terminal)) {
+                        this.followTerminalIntoTree(connection, directory);
+                    }
                 });
 
                 this.registerTerminal(connection, terminal);
@@ -1176,16 +1291,17 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
         }
 
         const provider = RemoteFileProvider.getProviderByConnectionId(connection.id);
-        if (!provider || provider.rootPath === directory) {
+        if (!provider) {
             return;
         }
 
         // Keeps the tree-to-terminal direction from echoing this straight back.
         this.pathFollower?.remember(connection.id, directory);
 
-        provider.updateConnection(connection, directory);
-        provider.refresh();
-        this.remoteFilesView?.setProvider(provider);
+        // Revealed rather than re-rooted: moving the root would throw away
+        // everything above the directory, leaving the tree showing one folder
+        // and no way back up.
+        void this.remoteFilesView?.reveal(provider.itemFor(directory));
     }
 
     public handleTerminalSelectionChange(terminal: vscode.Terminal) {
@@ -1218,6 +1334,8 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
     }
 
     public handleTerminalClose(terminal: vscode.Terminal) {
+        this.shells.delete(terminal);
+
         const connectionId = Array.from(this.terminals.entries()).find(([_, term]) => term === terminal)?.[0];
 
         if (connectionId) {
@@ -1524,6 +1642,59 @@ export class SSHViewProvider implements vscode.TreeDataProvider<SSHTreeNode> {
 
         removeKnownHost(hostname);
         vscode.window.showInformationMessage(`Removed the recorded key for ${hostname}.`);
+    }
+
+    /**
+     * Opens another terminal on a host that is already connected.
+     *
+     * The SSH connection carries as many shells as are asked of it, and one
+     * terminal per host is a limit of this extension rather than of SSH.
+     * Unlike the connection's own terminal, closing one of these does not
+     * disconnect the host.
+     *
+     * @param treeItem The connection to open a shell on.
+     */
+    public newTerminal(treeItem: SSHConnectionTreeItem): void {
+        const connection = treeItem.connection;
+
+        if (!connection.client) {
+            vscode.window.showErrorMessage(`Connect to ${connection.host} before opening a terminal.`);
+            return;
+        }
+
+        const base = connection.user ? `${connection.user}@${connection.host}` : connection.host;
+        const open = vscode.window.terminals;
+
+        // Split from a shell the host already has, so its terminals stay
+        // together in one group instead of scattering across the tab list.
+        // Matching on the open terminals rather than on the tracked one avoids
+        // reaching for a terminal that has since been closed.
+        const parent = open.find(terminal => terminal.name === base || terminal.name.startsWith(`${base} (`));
+        const name = nextTerminalName(
+            base,
+            open.map(existing => existing.name)
+        );
+
+        log.info(
+            `New terminal "${name}" on ${connection.host}: ` +
+                (parent ? `splitting from "${parent.name}".` : 'no shell of its own to split from, opening alone.')
+        );
+
+        const pty = new SSHPseudoterminal(connection.client, followTerminalDirectory(), name);
+        const terminal = vscode.window.createTerminal({
+            name,
+            pty,
+            ...(parent ? { location: { parentTerminal: parent } } : {}),
+        });
+
+        this.registerShell(connection.id, terminal);
+        pty.onDidChangeDirectory(directory => {
+            if (this.isActiveShell(terminal)) {
+                this.followTerminalIntoTree(connection, directory);
+            }
+        });
+
+        terminal.show();
     }
 
     public async ensureConnected(connection: ExtendedSSHConnection): Promise<ExtendedSSHConnection | undefined> {
